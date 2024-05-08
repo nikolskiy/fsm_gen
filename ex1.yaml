@@ -1,0 +1,262 @@
+name: example1
+
+# -------------
+# type
+# -------------
+
+# static type assumes only one copy of fsm per executable
+# intended use is creation on program startup and deletion
+# on program termination
+# state variables are hidden from external code
+# all functions work on this hidden state
+# i.e. passing of state is not assumed
+# only parameters for even handlers
+
+type: static
+
+# dynamic type allow to have many fsm states
+# all functions take explicit state parameter
+# and user is responsible for managing data
+# for these states
+
+#type: dynamic
+
+
+# -----------------------
+# Code generation options
+# -----------------------
+
+# these options are not mandatory
+# by default names for files are: {name}.h and {name}.c
+# without any prolog/epilog sections
+
+# one may specify file names explicitly
+
+#header: fsm.h
+#source: fsm.c
+
+# ore even specify prolog/epilog sections
+# for extra types and functions
+
+header:
+  file: fsm.h
+  prolog: |
+    #define something "123"
+  epilog: |
+    #define other_thing something
+    // comment
+
+source:
+  file: fsm.c
+  prolog: |
+    // here we may have some extra defintions, etc
+    // to use in event handlers
+  epilog: |
+    // to siplify testing
+    int main() {}
+
+# ------------------
+# Events definitions
+# ------------------
+
+# Events are central idea of an FSM
+# all transitions (state variables modifictions and action code execution)
+# are made only on events
+
+# events may have parameters
+
+events:
+  event1:
+    - p1:
+        # defaults are useless now for c-langauge
+        # but may be useful later for c++ code generation
+        int: 0
+    - p2: char
+    - p3: int
+  event2: # no parameters
+  event3:
+    # event3 should have the same signature to test merging transition handlers
+    - p1: int
+    - p2: char
+    - p3: int
+  tick:
+
+# ------------------------------
+# How to handle unhandled events
+# ------------------------------
+
+# Sometimes there is no transition from state for incoming event
+# or transition conditions is not met
+# So there is several ways to handle this case:
+# 1. Consider this situation as exceptional and halt the program
+# 2. Treat this situation as ordinary and just ignore event
+# 3. Allow user to specify his own code for handling
+
+# Handler can be common for all events
+# ignore/halt are self-descriptional
+
+unhandled events: ignore
+#unhandled events: halt
+
+#unhandled events: |
+#  // user can place here specific code
+#  // for handling unhandled events
+#  // all state variables are accessible
+#  // and extra __state_name and __event_name strings are
+#  // passed to this code (for logging or debug purposes))
+
+# Also reaction for unhadled events may be
+# specialized depending of event
+# just specify a dict with events names with
+# corresponding reactions
+# '*' name is reserved as default reaction for other
+# events, which are not mentioned in dict 
+
+#unhandled events:
+#  event1: ignore
+#  event2: |
+#    // user code as for common handlers
+#  *: ignore
+
+# --------------------------
+# state variables definition
+# --------------------------
+
+# There is one extra hidden variable is added
+# to track current state
+
+state variables:
+  count: int
+  ticks: # with initial values
+    char: 0
+  edge:
+    char: 0
+
+# ------------------------------------------
+# Optionsl Initialization & deinitialization
+# ------------------------------------------
+
+# User may define specific actions on FSM creation/destroy
+# to handle some complex initialization of state variables
+# or making some side effects
+
+init: |
+  // user specific code is called after setup
+  // of initial values for state variables
+  // i.e. state variables are already initialized
+ 
+deinit: |
+  // specific actions on fsm deallocation/deinitialization
+  // state variables are still accesible here
+  // FSM data should not be deallocated yet
+
+# ------------------
+# States definitions
+# ------------------
+
+# Each state can have optional entry/exit actions
+# Enter actions are executed after transition actions and
+# exit actions are executed befor transition actions
+
+# So if transition is switching FSM from state1 to state2 then
+# sequence is:
+# 1. Execute state1 exit actions if any
+# 2. Execute transition actions if any
+# 3. Execute state2 enter actions if any
+# 4. return control to ecent handler caller
+
+states:
+  state1:
+  state2:
+  state3:
+    enter: |
+      // do some actions on enter state
+      // state variables are accessible here
+      // they are modified by transition actions
+      // hidden state num variable are set to this state
+      // enevt parameters are not accessible (abviouslu)
+    exit: |
+      // some actions on state exit
+      // hidden state num variable points to this state
+      // all state variables are accessible and untoched by
+      // transisition actions (transition actions were not executed yet)
+
+# Mandatory definition of initial state
+initial state: state3
+
+
+# -------------------------
+# Transitions
+# -------------------------
+
+# The most interesting part of FSM specification
+
+# Transitions are organized as list, to keep linear order
+# Order implicitly defines priority: if several transitions are enabled,
+# then upper one (in this list) will be executed
+
+transitions:
+
+  # hope this defintion id self-descriptionary
+  - from: state1
+    to: state2
+    when: event1
+    if: count < 10
+    do: |
+      count++;
+      ticks--;
+      edge=23;
+
+  # we may define several transitions in one definition
+  # actually, next defintion is shortcut for two:
+  # - from: state1
+  #   ...
+  # and
+  # - from: state2
+  #   ...
+  
+  - from: [state1, state2]
+    to: state2
+    when: event1
+    if: count < 10
+    do: |
+      count++;
+      ticks--;
+      edge=3;
+
+  # we may ommit 'to' in defintion
+  # in this case transition is treated as loop to the stste itself
+  # so no entry/exit state code are executed
+  - from: state1
+    when: event2
+
+  # we may add loops to several states at once
+  # here are two rules in action:
+  # 1. expanding 'from' and generating several definition, as was explained erlier
+  # 2. applying rule of absent 'to' field, as in previous transition
+  - from: [state1, state2]
+    when: tick
+    do: |
+      ticks++;
+
+  # we may add transition to all stated, just fully ommiting 'from'
+  # so next defintion is adding self-loops on event 'tick'
+  # (note absence of 'to' field) for all states
+  - when: tick
+    do: |
+      ticks--;
+
+  # here is the trickiest definition
+  # if actually defines four transitions:
+  # 1. state1->state3 on event1
+  # 2. state1->state3 on event3
+  # 3. state2->state3 on event1
+  # 4. state2->state3 on event3
+  # BUT NB!: event1 and event3 parameters must be exactly the same
+  #          because all these transitions efectively share the same 'do' section
+  #          we may loose requirements for definitions without 'do' section, but
+  #          it may lead to some mess, because of different semantic handling of
+  #          defitions depending on presence of 'do' section, which might be undesirable
+  - from: [state1, state2]
+    to: state3
+    when: [event1, event3]

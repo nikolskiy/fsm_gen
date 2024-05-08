@@ -1,0 +1,488 @@
+#!/home/vasil/.nix-profile/bin/python
+
+import yaml
+import sys
+
+# TODO:
+# *1. Formatting of output code
+# 2. Factorization of state num comparisons in event handlers
+# 3. User control for state variable name/type and other namings
+# 3a. Add optional transition names
+# 3b. use constants for state nums
+# 4. User control for states enumeration
+# 5. User control for state num representation (one-hot, etc)
+# 6. Check for deadlocks (hanging states)
+# *7. User control for unhandled events
+# 8. Check for completeness of conditions
+# 9. conditions factorization
+# 10. add inline code option, to do not generate separate
+#     state enter/exit functions, transition action functions, but
+#     inline corresponding code
+
+if len(sys.argv) != 2:
+    print("Usage: fsm_gen fsm.yaml")
+    exit(0)
+
+with open(sys.argv[1]) as f:
+    fsm = yaml.load(f, Loader=yaml.Loader)
+
+fsm['name'] = fsm.get('name', None)
+
+if fsm['name'] is None:
+    print('FSM name is not specified')
+    exit(1)
+
+header = fsm.get('header', dict())
+source = fsm.get('source', dict())
+header_text = ""
+source_text = ""
+
+header['file'] = header.get('file', fsm['name'] + ".h")
+header['prolog'] = header.get('prolog', '')
+header['epilog'] = header.get('epilog', '')
+
+source['file'] = source.get('file', fsm['name'] + ".c")
+source['prolog'] = source.get('prolog', '')
+source['epilog'] = source.get('epilog', '')
+
+fsm['header'] = header
+fsm['source'] = source
+
+fsm['type'] = fsm.get('type', 'static')
+
+fsm['unhandled events'] = fsm.get('unhandled events', 'halt')
+if isinstance(fsm['unhandled events'], dict):
+    fsm['unhandled events']['*'] = fsm['unhandled events'].get('*', 'halt')
+
+#naming schema
+
+fsm['name prefix'] = fsm.get('name prefix', f"___{fsm['name']}___")
+fsm['state parameter name'] = fsm.get('state parameter name', f"{fsm['name prefix']}_state")
+fsm['state parameter type'] = fsm.get('state parameter type', f"{fsm['name prefix']}_state_variables")
+
+fsm['state num variable name'] = fsm.get('state num variable name', f"{fsm['name prefix']}_state_num")
+fsm['state num variable type'] = fsm.get('state num variable type', "unsigned char" if len(fsm['states']) <= 255 else "unsigned int")
+
+def indent(text):
+    text = text.splitlines(True)
+    if len(text) == 0:
+        return ""
+    text = "  ".join(text)
+    if text[-1] != '\n':
+        text += '\n'
+    return "  " + text
+
+def param_name(p):
+    return list(p)[0]
+
+def param_type(p):
+    t = list(p.values())[0]
+    if isinstance(t, dict):
+        return list(t)[0]
+    return t
+
+def param_value(p):
+    t = list(p.values())[0]
+    if isinstance(t, dict):
+        return list(t.values())[0]
+    return None
+
+def to_c_signature_str(params):
+    return ", ".join([f"{param_type(p)} {param_name(p)}" for p in params])
+
+def is_equal_sigs(s1, s2):
+    return to_c_signature_str(s1) == to_c_signature_str(s2)
+
+fsm['events'] = {
+    e: (params if isinstance(params, list) else [])
+    for e, params in fsm['events'].items()
+  }
+
+fsm['states'] = {
+    s: ({'enter': body.get('enter',None), 'exit': body.get('exit', None)} if isinstance(body, dict) else {'enter': None, 'exit':None})
+    for s, body in fsm['states'].items()
+  }
+
+fsm['state_by_num'] = dict()
+
+for idx, key in enumerate(fsm['states'].keys()):
+    fsm['states'][key]['num'] = idx
+    fsm['state_by_num'][idx] = key
+
+def get_state_num_variable(fsm):
+    fsm_name = fsm['name']
+    if fsm['type'] == 'static':
+        return f"{fsm['state parameter name']}.{fsm['state num variable name']}"
+    return f"{fsm['state parameter name']}->{fsm['state num variable name']}"
+
+def gen_state_struct(fsm):
+    fsm_name = fsm['name']
+    sv = fsm['state variables']
+    variables = []
+    initializers = []
+    for name, vt in sv.items():
+        t = param_type({name: vt})
+        variables.append(f"{t} {name}")
+    variables.append(f"{fsm['state num variable type']} {fsm['state num variable name']}")
+    variables = ";\n  ".join(variables)
+    result = "typedef struct {\n  " + variables + ";\n} " + f"{fsm['state parameter type']};\n"
+    return result
+
+def get_state_variables_init_vals(fsm):
+    fsm_name = fsm['name']
+    sv = fsm['state variables']
+    initializers = dict()
+    for name, vt in sv.items():
+        v = param_value({name: vt})
+        if v is not None:
+            initializers[name]=v
+    if fsm['type'] == 'static':
+        initializers[f"{fsm['state num variable name']}"]=fsm['states'][fsm['initial state']]['num']
+    return initializers
+
+def gen_state_struct_initializers(fsm):
+    inits = get_state_variables_init_vals(fsm)
+    inits = [ f".{name}={val}" for name, val in inits.items()]
+    return ", ".join(inits)
+
+def gen_header_prolog(fsm):
+    fsm_name = fsm['name']
+    header = fsm['header']
+    text = f"#ifndef {fsm['name prefix']}_header__\n#define {fsm['name prefix']}_header__\n{header['prolog']}\n"
+    if fsm['type'] == 'static':
+        text += f"void {fsm_name}_init();\n"
+        text += f"void {fsm_name}_deinit();\n"
+    else:
+        text += gen_state_struct(fsm);
+        text += f"void {fsm_name}_init ({fsm['state parameter type']}*);\n"
+        text += f"void {fsm_name}_deinit ({fsm['state parameter type']}*);\n"
+    return text
+
+def gen_state_names_function(fsm):
+    text = f"const char* {fsm['name prefix']}_get_state_name("
+    text += "" if fsm['type'] == 'static' else f"const {fsm['state parameter type']}*  {fsm['state parameter name']}"
+    text += ")\n{\n"
+    text += f"  switch({get_state_num_variable(fsm)})" + " {\n"
+    for name, s in fsm['states'].items():
+        text += f"    case {s['num']}: return \"{name}\";\n"
+    text += "    default: return \"__Unknown__\";\n  }\n"
+    text += "}\n"
+    return text
+
+def gen_unhandled_event_handlers(fsm):
+    handler = fsm['unhandled events']
+    text = ""
+    if not isinstance(handler, dict):
+        if handler not in ['halt', 'ignore']:
+            # generate user specified handler
+            handler = indent(handler)
+            if fsm['type'] == 'static':
+                text += f"static void {fsm['name prefix']}_unhandled_event (const char* __state_name, const char* __event_name)\n" + "{\n" +  handler + "}\n";
+            else:
+                text += f"static void {fsm['name prefix']}_unhandled_event ({fsm['state parameter type']}* {fsm['state parameter name']}, const char* __state_name, const char* __event_name)\n" + "{\n" +  handler + "}\n";
+            return text
+        return text
+    user_handlers = {e: h for e, h in handler.items() if h not in ['ignore', 'halt']}
+    if len(user_handlers) > 0:
+        for e, h in user_handlers.items():
+            if e == "*":
+                e = ""
+            else:
+                e = "_" + e
+            h = indent(h)
+            if fsm['type'] == 'static':
+                text += f"static void {fsm['name prefix']}_unhandled_event{e} (const char* __state_name, const char* __event_name)\n" + "{\n" +  h + "}\n";
+            else:
+                text += f"static void {fsm['name prefix']}_unhandled_event{e} ({fsm['state parameter type']}* {fsm['state parameter name']}, const char* __state_name, const char* __event_name)\n" + "{\n" +  h + "}\n";
+    return text
+
+def gen_source_prolog(fsm):
+    source = fsm['source']
+    text = f"#include \"{header['file']}\"\n{source['prolog']}\n"
+    if fsm['type'] == 'static':
+        text += gen_state_struct(fsm);
+        text += f"static {fsm['state parameter type']} {fsm['state parameter name']}" + " = { " + gen_state_struct_initializers(fsm) + " };\n"
+        for var_name in fsm['state variables'].keys():
+            text += f"#define {var_name} {fsm['state parameter name']}.{var_name}\n"
+    return text
+
+def gen_source_init_deinit(fsm):
+    source = fsm['source']
+    text = ""
+    initial_state_num = fsm['states'][fsm['initial state']]['num']
+    initial_state_enter_call = gen_call_to_state_entry_exit(fsm, initial_state_num, 'enter') or ""
+    if fsm['type'] == 'static':
+        text += f"void {fsm['name']}_init()\n" + "{\n"  + indent(initial_state_enter_call + ";\n" + fsm.get('init','')) + "}\n";
+        text += f"void {fsm['name']}_deinit()\n" + "{\n" + indent(fsm.get('deinit','')) + "}\n";
+    else:
+        inits = get_state_variables_init_vals(fsm)
+        # special handling of state num variable in dynamic mode, as we put thin in init code
+        inits[f"{get_state_num_variable(fsm)}"] = initial_state_num
+        inits = [ f"{name}={val};" for name, val in inits.items() ]
+        inits = "\n".join(inits)
+        for var_name in fsm['state variables'].keys():
+            text += f"#define {var_name} {fsm['state parameter name']}->{var_name}\n"
+        text += f"void {fsm['name']}_init ({fsm['state parameter type']}* {fsm['state parameter name']})\n" + "{\n" + indent(inits + "\n" + initial_state_enter_call + ";\n"+ fsm.get('init','')) + "}\n";
+        text += f"void {fsm['name']}_deinit ({fsm['state parameter type']}* {fsm['state parameter name']})\n" + "{\n" + indent(fsm.get('deinit','')) + "}\n";
+    return text
+
+def gen_source_unhandled_event_handlers(fsm):
+    text = ""
+    unhandled_event_handlers = gen_unhandled_event_handlers(fsm)
+    if unhandled_event_handlers != "":
+        text += gen_state_names_function(fsm)
+        text += unhandled_event_handlers
+    return text
+
+def gen_event_handler_signature(fsm, e):
+    s = fsm['events'][e]
+    sig = []
+    if fsm['type'] != 'static':
+        sig = [f"{fsm['state parameter type']}* {fsm['state parameter name']}"]
+    s = to_c_signature_str(s)
+    if s != "":
+        sig.append(s)
+    sig = ", ".join(sig)
+    return sig
+
+def gen_event_handlers_definitions(fsm):
+    text = ""
+    for e, s in fsm['events'].items():
+        text += f"void {fsm['name']}_{e} ({gen_event_handler_signature(fsm, e)});\n"
+    return text
+
+def gen_states_entries_and_exits(fsm):
+    text = ""
+    for name, body in fsm['states'].items():
+        def gen_code(kind):
+            code = ""
+            if body[kind] is not None:
+                if fsm['type'] == 'static':
+                    code += f"static void {fsm['name prefix']}_state_{name}_{kind}()\n"
+                else:
+                    code += f"static void {fsm['name prefix']}_state_{name}_{kind} ({fsm['state parameter type']}* {fsm['state parameter name']})\n"
+                code += "{\n" + indent(body[kind]) + "}\n"
+            return code
+        text += gen_code('enter')
+        text += gen_code('exit')
+    return text
+
+def gen_call_to_transition_action(fsm, idx):
+    tr = fsm['transitions'][idx]
+    evt = tr['when']
+    if isinstance(evt, list):
+        evt = evt[0]
+    params = []
+    if fsm['type'] != 'static':
+        params = [fsm['state parameter name']]
+    params += [param_name(p) for p in fsm['events'][evt]]
+    params = ", ".join(params)
+    return f"{fsm['name prefix']}_transition_actions_{idx} ({params})"
+
+def gen_transition_actions(fsm):
+    events = fsm['events']
+    text = ""
+    for idx, tr in enumerate(fsm['transitions']):
+        evt = tr['when']
+        if isinstance(evt, list):
+            if not all([is_equal_sigs(events[evt[0]], events[e]) for e in evt]):
+                print("Error: event signatures are not the same")
+                for e in evt:
+                    print({e: events[e]})
+                exit(1)
+            evt = evt[0]
+        sig = []
+        if fsm['type'] != 'static':
+            sig = [f"{fsm['state parameter type']}* {fsm['state parameter name']}"]
+        s = to_c_signature_str(events[evt])
+        if s != "":
+            sig.append(s)
+        sig = ", ".join(sig)
+        if 'do' in tr:
+            text += f"static void {fsm['name prefix']}_transition_actions_{idx} ({sig})\n"
+            text += "{\n" + indent(tr['do']) + "}\n"
+    return text
+
+def gen_call_to_state_entry_exit(fsm, idx, kind):
+    call = None
+    name = fsm['state_by_num'][idx]
+    body = fsm['states'][name]
+    if body[kind] is not None:
+        if fsm['type'] == 'static':
+            call = f"{fsm['name prefix']}_state_{name}_{kind}()"
+        else:
+            call = f"{fsm['name prefix']}_state_{name}_{kind} ({fsm['state parameter name']})"
+    return call
+
+def gen_unhandled_event_handler(fsm, event_name):
+    handler = fsm['unhandled events']
+    if not isinstance(handler, dict):
+        if handler == 'halt':
+            return "  while(1){};\n"
+        if handler == 'ignore':
+            return "  // warning: ignoring unhandled event\n"
+        if fsm['type'] == 'static':
+            return f"  {fsm['name prefix']}_unhandled_event ({fsm['name prefix']}_get_state_name(), \"{event_name}\");\n"
+        else:
+            return f"  {fsm['name prefix']}_unhandled_event ({fsm['state parameter name']}, {fsm['name prefix']}_get_state_name({fsm['state parameter name']}), \"{event_name}\");\n"
+    if event_name in handler:
+        handler = handler[event_name]
+        if handler == 'halt':
+            return "  while(1){};\n"
+        if handler == 'ignore':
+            return "  // warning: ignoring unhandled event\n"
+        if fsm['type'] == 'static':
+            return f"  {fsm['name prefix']}_unhandled_event_{event_name} ({fsm['name prefix']}_get_state_name(), \"{event_name}\");\n"
+        else:
+            return f"  {fsm['name prefix']}_unhandled_event_{event_name} ({fsm['state parameter name']}, {fsm['name prefix']}_get_state_name({fsm['state parameter name']}), \"{event_name}\");\n"
+    handler = handler['*']
+    if handler == 'halt':
+        return "  while(1){};\n"
+    if handler == 'ignore':
+        return "  // warning: ignoring unhandled event\n"
+    if fsm['type'] == 'static':
+        return f"  {fsm['name prefix']}_unhandled_event ({fsm['name prefix']}_get_state_name(), \"{event_name}\");\n"
+    else:
+        return f"  {fsm['name prefix']}_unhandled_event ({fsm['state parameter name']}, {fsm['name prefix']}_get_state_name({fsm['state parameter name']}), \"{event_name}\");\n"
+
+def gen_event_handlers(fsm):
+    fsm_name = fsm['name']
+    events = fsm['events']
+    text = ""
+
+    state_num_var = get_state_num_variable(fsm)
+    state_num_var_local = fsm['state num variable name']
+    all_states = list(fsm['states'].keys())
+
+    for evt_name, params in events.items():
+        text += f"void {fsm_name}_{evt_name} ({gen_event_handler_signature(fsm, evt_name)})\n"
+        text += "{\n"
+        text += f"  register {fsm['state num variable type']} {state_num_var_local} = {state_num_var};\n"
+
+        unconditional_return = False
+
+        for idx, tr in enumerate(fsm['transitions']):
+
+            if unconditional_return:
+                text += "  // NB: Unconditial return here, so next transitions are not procesed.\n"
+                break
+
+            evt = tr['when']
+            if not isinstance(evt, list):
+                evt = [evt]
+            if not evt_name in evt:
+                continue
+            text += f"  // transition {idx}\n"
+            from_ = tr.get('from', all_states)
+            if not isinstance(from_, list):
+                from_ = [from_]
+            to = tr.get('to', None)
+            self_loop_for_to = isinstance(from_, list) and to in from_
+
+            if self_loop_for_to:
+                from_.remove(to)
+
+            states_nums = list({ (fsm['states'][state]['num']) for state in from_ })
+
+            if len(states_nums) == len(all_states):
+                # 'from' contains all states, so no check is needed
+                check = tr.get('if','')
+                text += "  // field 'from' contains all states, so no check for state is needed\n"
+            else:
+                check = [f"{state_num_var_local} == {num}" for num in states_nums]
+                check = "  ||\n".join(check)
+                check = "(\n" + indent(check) + ")"
+                if 'if' in tr:
+                    check += " &&\n(" + tr['if'] + ")"
+
+            def make_if(cond, code):
+                src = ""
+                if cond != "":
+                    src += f"if (\n{indent(cond)}) " + "{\n"
+                src += indent(code)
+                if cond != "":
+                    src += "}\n"
+                    src = indent(src)
+                return src
+
+            unconditional_return = check == ""
+
+            if to is None:
+                # self loop, no state enter, no state exit execution
+                if 'do' in tr:
+                    text += make_if(check, gen_call_to_transition_action(fsm, idx) + ";\nreturn;\n")
+                else:
+                    text += f"  // Warning: meaningless self loop transition withot 'do'\n"
+            else:
+                # self loop first as hottest path
+                if self_loop_for_to:
+                    text += "  // check self-loop first, considering it as hottest control-flow path\n"
+                    check_self = f"( {state_num_var_local} == {fsm['states'][to]['num']} )"
+                    if 'if' in tr:
+                        check_self += " && (" + tr['if'] + ")"
+                    if 'do' in tr:
+                        text += f"  if ( {check_self} ) " + "{ " + gen_call_to_transition_action(fsm, idx) + "; return; }\n"
+
+                # generate state entry calls
+                entry = gen_call_to_state_entry_exit(fsm, fsm['states'][to]['num'], 'enter')
+
+                exits = [(num, gen_call_to_state_entry_exit(fsm, num, 'exit')) for num in states_nums]
+                exits = [exit for exit in exits if exit[1] is not None]
+                exits_code = ""
+                if len(exits) > 1:
+                    exits_code += f"switch({state_num_var_local})" + " {\n"
+                    for num, call in exits:
+                        exits_code += f"  case {num}: {call}; break;\n"
+                    exits_code += "  default: break;\n}\n"
+
+                if 'do' not in tr and entry is None and exits == [] and not self_loop_for_to:
+                    text += f"  // Warning: meaningless transition {from_} -> {to}\n"
+                    text += f"  //          no transition actions, no enter state actions,\n"
+                    text += f"  //          no exit state actions.\n"
+                    text += f"  //          Is there any error in transition definiton in FSM specs?\n"
+                    # no return operator was generated in code, so
+                    unconditional_return = False
+                else:
+                    src = exits_code
+                    if 'do' in tr:
+                        src += gen_call_to_transition_action(fsm, idx) + ";\n"
+                    src += f"{state_num_var} = {fsm['states'][to]['num']};\n"
+                    if entry is not None:
+                        src += f"{entry};\n"
+                    src += "return;\n"
+                    text += make_if(check, src)
+
+        if not unconditional_return:
+            text += gen_unhandled_event_handler(fsm, evt_name)
+
+        text += "}\n"
+
+    return text
+
+def gen_header_epilog(fsm):
+    return f"\n{fsm['header']['epilog']}\n#endif // {fsm['name prefix']}_header__\n"
+
+def gen_source_epilog(fsm):
+    text = ""
+    for var_name in fsm['state variables'].keys():
+        text += f"#undef {var_name}\n"
+    text += f"\n{fsm['source']['epilog']}\n"
+    return text
+  
+header_text += gen_header_prolog(fsm)
+header_text += gen_event_handlers_definitions(fsm)
+header_text += gen_header_epilog(fsm)
+
+source_text += gen_source_prolog(fsm)
+source_text += gen_states_entries_and_exits(fsm)
+source_text += gen_source_init_deinit(fsm)
+source_text += gen_source_unhandled_event_handlers(fsm)
+source_text += gen_transition_actions(fsm)
+source_text += gen_event_handlers(fsm)
+source_text += gen_source_epilog(fsm)
+
+with open(header['file'], "w") as f:
+    f.write(header_text) 
+
+with open(source['file'], "w") as f:
+    f.write(source_text) 
