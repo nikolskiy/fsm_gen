@@ -1,3 +1,36 @@
+# TODO: 
+# 1. add include ability, to share data-types, external definitions, etc among specs
+# 2. datatypes
+# 3. external definitions
+# 4. DSL for 'if' sections
+# 5. DSL for enter/exit/do sections
+# 6. upgrade delayed and queued event specs and handling: merge parameters
+# 7. Fall-through event handling?
+#    case:
+#       transitions:
+#
+#         - when: tick
+#           do: ticks_num++
+#           fallthrough: true
+#
+#         - from: s1
+#           to: s2
+#           when: tick
+#           if: ticks_num > 10
+#
+#    after handling this transition, tick event handler continue to process
+#    other transitions.
+#    This approach breaks to some extent semantic of an FSM: one event - one transition
+#    esp. on conditional transitions.
+#    We may restrict fall-through transition handling only to self-loops without 'if',
+#    then it is almost the same as to add code of 'do' actions from fall-though transition
+#    to all other transitions for this event.
+#    Only problem here is when other branches are not taken and we go to unhandled event code.
+#    To avoid this mismatch in semantic, we may explicitly update 'do' sections from other
+#    branches.
+#    But for practice fall-through handling may be very useful: saves code and simplifies sepcification
+# 8. add delayed(even_name, params) macro -> fsm_event_delayed(...)
+# 9. add enqueue(event_name, params) macro -> fsm_event_enqueue(...)
 name: example1
 
 # -------------
@@ -55,6 +88,62 @@ source:
     // to siplify testing
     int main() {}
 
+
+#-------------------
+# Data types TODO
+#-------------------
+
+# move data types to separate spec and put here only include stmt
+# do not generate data type declarations in fsm code
+
+# data types: 'file'
+
+data types:
+  - structure1:
+     - field1: u8
+     - field2: u16
+  - structure2:
+    - field1: structure1
+
+# data types allocation scheme:
+# dynamic - uses ordinary malloc
+# fixed - uses preallocated structures
+# management: using pointers, using indices
+# structure1_ptr strucutre1_alloc()
+# void strucutre1_free(structure1_ptr)
+# access:
+# set(structure2.field1.field2, value)
+# get(structure2.field1.field2)
+# garbage collection: rc and explicit gc
+
+# main idea is to give simple and efficient memory
+# management for small embedded systems
+
+#------------------------
+# External functions TODO
+#------------------------
+
+# can be used in conditions
+# it is responsibility of user to guarantee that theese functions
+# are pure
+#
+# pure functions:
+#   function1:
+#     result: type
+#     inputs:
+#       - param1: type
+#       - param2: type
+
+# can be used only in effectful-code:
+#   'do' actions
+#   'enter'/'exit'
+#
+# functions:
+#   # if result is not specified, then function is treated as procedure
+#   function2:
+#     inputs:
+#       ....
+
 # ------------------
 # Events definitions
 # ------------------
@@ -64,6 +153,8 @@ source:
 # are made only on events
 
 # events may have parameters
+
+# TODO: use only defined datatypes
 
 events:
   event1:
@@ -81,6 +172,54 @@ events:
     - p3: int
   tick:
 
+
+#-----------------------
+# Delayed events
+#-----------------------
+
+# list of events that can be delayed
+# what is a delayed event?
+# it is just a closure of the corresponding event handler {fn, data}
+# closure is created as an ordinary call to event handler,
+# but enstead of handling event, it just returns data to process event
+# later elsewhere: void* {fsm_name}_event_delayed(...params...)
+
+# this approach may be useful in fully reactive systems, when you want to
+# process external event in ISR as fast as possible to do not miss other
+# interrupts. In this case you just create a closure of event handler in an ISR
+# and execute this handler later in main event loop.
+
+# if closure cannot be created (maximum is reached) then NULL ptr is returned
+# and it is upper code responsibility to handle this situation
+
+delayed:
+  event1:
+    max: 8 # max possible delayed events of this type
+  event3:
+    max: 4
+  tick:
+    max: 16
+
+# give user an ability to explicetely specify merging of parameters 
+# delayed:
+#   - max: 8
+#     events: [event1, event2 ...]
+#   - max: 16
+#     events: [...]
+#   - max: 32
+#     events: *
+      
+# events are not handled immediately, but closures are placed in queue
+# then later user can call fsm_process_queue() function
+# to handle all queued events
+# call: void fsm_queue_event1(...params...)
+# queue mostly reuses delayed event structures, so
+# if you want to queue some event type, you should define it in delayed
+queue: true 
+
+# or create separate management for queue:
+# queue:
+#   max: 8
 # ------------------------------
 # How to handle unhandled events
 # ------------------------------
@@ -95,8 +234,8 @@ events:
 # Handler can be common for all events
 # ignore/halt are self-descriptional
 
-unhandled events: ignore
-#unhandled events: halt
+#unhandled events: ignore
+unhandled events: halt
 
 #unhandled events: |
 #  // user can place here specific code
@@ -195,6 +334,9 @@ initial state: state3
 # Order implicitly defines priority: if several transitions are enabled,
 # then upper one (in this list) will be executed
 
+# transition conditions in 'if' sections are assumed pure functional, ie
+# without any side-effects (no ++X, Y--, calls to impure functions, etc)
+
 transitions:
 
   # hope this defintion id self-descriptionary
@@ -206,6 +348,7 @@ transitions:
       count++;
       ticks--;
       edge=23;
+      delay_event3(1,2,3);
 
   # we may define several transitions in one definition
   # actually, next defintion is shortcut for two:
@@ -223,6 +366,7 @@ transitions:
       count++;
       ticks--;
       edge=3;
+      delay_tick();
 
   # we may ommit 'to' in defintion
   # in this case transition is treated as loop to the stste itself
