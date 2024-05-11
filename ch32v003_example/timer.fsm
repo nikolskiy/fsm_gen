@@ -1,0 +1,50 @@
+name: timer
+type: static
+header:
+  prolog: |
+    #include "config.h"
+source:
+  prolog: |
+    #define process_event(E) (*((void(**)(void*))E))(E)
+    #define MAX_TIMERS 8
+    typedef struct timer_struct {
+      void *event;
+      uint32_t time;
+    } timer_type[MAX_TIMERS];
+interrupts state type: uint32_t
+events:
+  clock:
+  set:
+    - timeout: uint32_t
+    - delayed_event: void*
+unhandled events: ignore
+delayed:
+  clock:
+    max: 4
+queue: true
+state variables:
+  timers:
+    timer_type: '{ [0 ... MAX_TIMERS-1]={.time=0}}'
+states:
+  wait:
+initial state: wait
+transitions:
+  - when: clock
+    do: |
+      for(int i=0; i<MAX_TIMERS; ++i) {
+        if (timers[i].time>0) {
+          --timers[i].time;
+          if (timers[i].time==0) {
+            process_event(timers[i].event);
+          }
+        }
+      }
+  - when: set
+    do: |
+      for(int i=0; i<MAX_TIMERS; ++i) {
+        if (timers[i].time==0){
+          timers[i].time = timeout;
+          timers[i].event = delayed_event;
+          return;
+        }
+      }

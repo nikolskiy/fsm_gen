@@ -18,7 +18,7 @@ import sys
 # 10. add inline code option, to do not generate separate
 #     state enter/exit functions, transition action functions, but
 #     inline corresponding code
-# 11. enqueue_self() macro for transition 'do' block on delayed events
+# !11. enqueue_self() macro for transition 'do' block on delayed events
 #     to postpone event handling
 #     - from: state1
 #       to: state2
@@ -33,6 +33,23 @@ import sys
 #         ....
 #     due to priority, first transition actions code will always postpone processing
 #     until resources are greater or equal than 10 
+#     to do not screw semantic: only self-loops can be postponed, and there is should
+#     not be 'do' actions. Then this case is equivalent to rearranging of encoming events
+#     and slightly changing 'if' conditions of corresponding transitions.
+# ?12. Predicates. 'if' section can contain only boolean formula over predicates
+#     predicates:
+#       timeout: time > timeout
+#     export predicates:
+#       - timeout
+# ?13. Observers - functions over state, that can return some value
+#     observers:
+#       get_voltage:
+#         uint32_t: ...expression over state variables...
+#      observers can be used by external code to get some information about FSM
+#     export observers:
+#       - get_voltage
+#  14. state variables initialization of complex types structs, arrays, etc.
+#      type declaration with mandatory initialization?
 
 if len(sys.argv) != 2:
     print("Usage: fsm_gen fsm.yaml")
@@ -351,8 +368,6 @@ def gen_source_init_deinit(fsm):
     #TODO generate state exit calls on deinit
     if fsm['type'] == 'static':
         init = fsm.get('init','')
-        if init != "":
-            init += ";\n"
         if initial_state_enter_call != "":
             init += initial_state_enter_call + ";"
         text += f"void {fsm['name']}_init()\n" + "{\n"  + indent(init)  + "}\n";
