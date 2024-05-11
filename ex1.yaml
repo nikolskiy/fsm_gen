@@ -29,8 +29,6 @@
 #    To avoid this mismatch in semantic, we may explicitly update 'do' sections from other
 #    branches.
 #    But for practice fall-through handling may be very useful: saves code and simplifies sepcification
-# 8. add delayed(even_name, params) macro -> fsm_event_delayed(...)
-# 9. add enqueue(event_name, params) macro -> fsm_event_enqueue(...)
 name: example1
 
 # -------------
@@ -45,14 +43,14 @@ name: example1
 # i.e. passing of state is not assumed
 # only parameters for even handlers
 
-type: static
+#type: static
 
 # dynamic type allow to have many fsm states
 # all functions take explicit state parameter
 # and user is responsible for managing data
 # for these states
 
-#type: dynamic
+type: dynamic
 
 
 # -----------------------
@@ -82,11 +80,18 @@ header:
 source:
   file: fsm.c
   prolog: |
-    // here we may have some extra defintions, etc
-    // to use in event handlers
+    #include <stdio.h>
+    #include <stdlib.h>
   epilog: |
     // to siplify testing
-    int main() {}
+    int main() {
+        example1_state_variables fsm;
+        example1_init(&fsm);
+        example1_tick_enqueue(&fsm);
+        example1_tick_enqueue(&fsm);
+        example1_process_queue(&fsm);
+        example1_deinit(&fsm);
+    }
 
 
 #-------------------
@@ -220,6 +225,8 @@ queue: true
 # or create separate management for queue:
 # queue:
 #   max: 8
+
+
 # ------------------------------
 # How to handle unhandled events
 # ------------------------------
@@ -388,7 +395,8 @@ transitions:
   # (note absence of 'to' field) for all states
   - when: tick
     do: |
-      ticks--;
+      ticks+=5;
+      printf("%d\n", ticks);
 
   # here is the trickiest definition
   # if actually defines four transitions:
