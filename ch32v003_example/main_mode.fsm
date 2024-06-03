@@ -1,0 +1,189 @@
+name: main_mode
+type: static
+header:
+  prolog: |
+    #include "config.h"
+source:
+  prolog: |
+    #include <stdio.h>
+    #include "display.h"
+    #include "timer.h"
+    #include "system_state.h"
+    #include "menu_mode.h"
+    #include "motor.h"
+
+interrupts state type: uint32_t
+events:
+  mode_select_ok:
+  mode_select_cancel:
+  button_press:
+  button_release:
+  button_longpress:
+  encoder_cw:
+  encoder_ccw:
+  motor_stall:
+  cont_pause_timer:
+  auto_pause_timer:
+delayed:
+  mode_select_ok:
+    max: 1
+  mode_select_cancel:
+    max: 1
+  button_press:
+    max: 1
+  button_release:
+    max: 1
+  button_longpress:
+    max: 1
+  encoder_cw:
+    max: 1
+  encoder_ccw:
+    max: 1
+  motor_stall:
+    max: 1
+  cont_pause_timer:
+    max: 1
+  auto_pause_timer:
+    max: 2
+queue: true
+unhandled events: ignore
+state variables:
+  motor_dir:
+    int: 0
+  countdown:
+    uint32_t: 0
+  timer_callback:
+    void*: ((void*)0)
+states:
+  pause_manual:
+    enter: |
+      display_show_pause();
+  run_manual:
+    enter: |
+      if (motor_dir) {
+        motor_start_left(delay_motor_stall());
+        display_show_motor_left();
+      } else {
+        motor_start_right(delay_motor_stall());
+        display_show_motor_right();
+      }
+  pause_auto:
+    enter: |
+      motor_dir = 1 - motor_dir;
+      countdown=global_state.interval * 60;
+      timer_set(10000, delay_auto_pause_timer());
+      display_show_interval_pause(countdown / 60);
+  run_auto:
+    enter: |
+      if (motor_dir) {
+        motor_start_left(delay_motor_stall());
+        display_show_motor_left();
+      } else {
+        motor_start_right(delay_motor_stall());
+        display_show_motor_right();
+      }
+  cont:
+    enter: |
+      if (motor_dir) {
+        display_show_motor_left();
+        motor_start_left(delay_motor_stall());
+      } else {
+        motor_start_right(delay_motor_stall());
+        display_show_motor_right();
+      }
+  cont_pause:
+    enter: |
+      motor_dir = 1 - motor_dir;
+      display_show_pause();
+  menu:
+    enter: |
+      menu_mode_enter_menu_enqueue(delay_mode_select_ok(), delay_mode_select_cancel());
+initial state: menu
+transitions:
+
+  - from: menu
+    to: pause_manual
+    when: [mode_select_ok, mode_select_cancel]
+    if: global_state.mode == MANUAL_MODE
+
+  - from: menu
+    to: pause_auto
+    when: [mode_select_ok, mode_select_cancel]
+    if: global_state.mode == INTERVAL_MODE
+
+  - from: menu
+    to: cont
+    when: [mode_select_ok, mode_select_cancel]
+    if: global_state.mode == CONT_MODE
+
+# manual mode
+
+  - from: pause_manual
+    to: run_manual
+    when: button_release
+    do: motor_dir = 1 - motor_dir;
+
+  - from: run_manual
+    to: pause_manual
+    when: motor_stall
+
+  - from: run_manual
+    when: button_release
+    do: motor_stop_enqueue();
+
+  - from: pause_manual
+    to: menu
+    when: button_longpress
+
+# cont mode
+
+  - from: cont_pause
+    to: menu 
+    when: button_longpress
+
+  - from: cont_pause
+    to: cont
+    when: button_release
+
+  - from: cont_pause
+    to: cont
+    when: cont_pause_timer
+
+  - from: cont
+    to: cont_pause
+    when: button_release
+
+  - from: cont
+    to: cont_pause
+    when: motor_stall
+    do: timer_set(50000, delay_cont_pause_timer());
+
+# auto mode
+
+  - from: pause_auto
+    to: menu
+    when: button_longpress
+
+  - from: pause_auto
+    to: run_auto
+    when: button_release
+
+  - from: run_auto
+    to: pause_auto
+    when: button_release
+
+  - from: run_auto
+    to: pause_auto
+    when: motor_stall
+
+  - from: pause_auto
+    to: run_auto
+    when: auto_pause_timer
+    if: countdown == 0
+
+  - from: pause_auto
+    when: auto_pause_timer
+    do: |
+      timer_set(10000, delay_auto_pause_timer());
+      display_show_interval_pause(countdown / 60);
+      --countdown;

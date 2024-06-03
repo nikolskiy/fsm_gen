@@ -1,0 +1,146 @@
+name: tm1637_i2c
+type: static
+header:
+  prolog: |
+    #include "config.h"
+source:
+  prolog: |
+    #include <stdio.h>
+    #define i2c_c(d) funDigitalWrite(PC2, d ? FUN_HIGH:FUN_LOW)
+    #define i2c_d(d) funDigitalWrite(PC1, d ? FUN_HIGH:FUN_LOW)
+interrupts state type: uint32_t
+init: |
+  funGpioInitC();
+  funPinMode(PC1, GPIO_CFGLR_OUT_10Mhz_OD);
+  funPinMode(PC2, GPIO_CFGLR_OUT_10Mhz_OD);
+  i2c_c(FUN_HIGH);
+  i2c_d(FUN_HIGH);
+events:
+  clock:
+  send:
+    - e_data: uint8_t
+    - e_callback: void*
+  start:
+    - e_callback: void*
+  stop:
+    - e_callback: void*
+unhandled events: ignore
+delayed:
+  clock:
+    max: 2
+  send:
+    max: 1
+  start:
+    max: 1
+  stop:
+    max: 1
+queue: true
+state variables:
+  data:
+    uint16_t: 0
+  callback:
+    void*: ((void*)0)
+states:
+  wait:
+  start:
+  stop:
+  send:
+  send_c:
+  send_cl:
+initial state: wait
+transitions:
+
+# START
+
+  - from: wait
+    to: start
+    when: start
+    do: |
+      callback = e_callback;
+      data = 1;
+      i2c_c(1);
+      i2c_d(1);
+
+  - from: start
+    when: clock
+    if: data == 1
+    do: |
+      --data;
+      i2c_d(0);
+
+  - from: start
+    to: wait
+    when: clock
+    if: data == 0
+    do: |
+      i2c_c(0);
+      __process_event(callback);
+
+# STOP
+
+  - from: wait
+    to: stop
+    when: stop
+    do: |
+      callback = e_callback;
+      data = 2;
+      i2c_c(0);
+
+  - from: stop
+    when: clock
+    if: data == 2
+    do: |
+      --data;
+      i2c_d(0);
+
+  - from: stop
+    when: clock
+    if: data == 1
+    do: |
+      --data;
+      i2c_c(1);
+
+  - from: stop
+    to: wait
+    when: clock
+    do: |
+      i2c_d(1);
+      __process_event(callback);
+
+#SEND
+
+  - from: wait
+    to: send
+    when: send
+    do: |
+      data = 0x100 | e_data;
+      callback = e_callback;
+      i2c_c(0);
+
+  - from: send
+    to: send_c
+    when: clock
+    if: data > 0
+    do: |
+      i2c_d(data&0x1);
+      data >>= 1;
+
+  - from: send_c
+    to: send_cl
+    when: clock
+    do: i2c_c(1);
+
+  - from: send_cl
+    to: send
+    when: clock
+    do: i2c_c(0);
+
+  - from: send
+    to: wait
+    when: clock
+    do: |
+      i2c_c(0);
+      __process_event(callback);
+
+# SKIP CLOCK
+  - when: clock

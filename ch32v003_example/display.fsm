@@ -1,0 +1,250 @@
+name: display
+type: static
+header:
+  prolog: |
+    #include "config.h"
+    #include <stdio.h>
+    #include "error_codes.h"
+source:
+  prolog: |
+    #include "tm1637.h"
+    #include "timer.h"
+
+    //
+    //      A
+    //     ---
+    //  F |   | B
+    //     -G-
+    //  E |   | C
+    //     ---
+    //      D
+    const uint8_t digitToSegment[] = {
+     // XGFEDCBA
+      0b00111111,    // 0
+      0b00000110,    // 1
+      0b01011011,    // 2
+      0b01001111,    // 3
+      0b01100110,    // 4
+      0b01101101,    // 5
+      0b01111101,    // 6
+      0b00000111,    // 7
+      0b01111111,    // 8
+      0b01101111,    // 9
+      0b01110111,    // A
+      0b01111100,    // b
+      0b00111001,    // C
+      0b01011110,    // d
+      0b01111001,    // E
+      0b01110001,    // F
+      0b01110011,    // P
+      0b01110110,    // H
+      0b00110000,    // I
+      0b00110001     // R
+    };
+
+    uint32_t num_to_segs(int num, int digits) {
+        uint32_t result = 0;
+        int shift = 32;
+        int minus = 0;
+        if (num < 0) {
+            num = -num;
+            minus = 1;
+        }
+        while(num) {
+            result >>= 8;
+            result |= (digitToSegment[num % 10] << 24);
+            num /= 10;
+            shift -= 8;
+            --digits;
+        }
+        if (minus) {
+            result >>= 8;
+            result |= 0x40000000;
+            shift -= 8;
+            --digits;
+        }
+        if (result == 0)
+        {
+            result = digitToSegment[0] << 24;
+            shift-=8;
+            --digits;
+        }
+        while(digits > 0){
+            result >>=8;
+            result |= digitToSegment[0] << 24;
+            shift-=8;
+            --digits;
+        }
+        result >>= shift;
+        return result;
+    }
+
+    typedef struct animation{
+        uint32_t frames[8];
+        int frame_idx;
+        int last_frame;
+    } animation_type;
+interrupts state type: uint32_t
+events:
+  timer:
+  show_time:
+    - hh: uint8_t
+    - mm: uint8_t
+  show_interval_mode:
+    - mm: uint16_t
+  show_interval_pause:
+    - mm: uint16_t
+  show_manual_mode:
+  show_pause:
+  show_cont_mode:
+  show_motor_left:
+  show_motor_right:
+  show_parameter:
+    - idx: parameter_type
+  show_number:
+    - num: int
+  show_error:
+    - code: error_code_type
+delayed:
+  timer:
+    max: 2
+unhandled events: ignore
+state variables:
+  animation:
+    animation_type: '{.frames={[0 ... 7]=0}, .frame_idx=0, .last_frame=0}'
+states:
+  animate:
+initial state: animate
+init: |
+  timer_set(2000, delay_timer());
+transitions:
+  - from: animate
+    when: timer
+    if: animation.frame_idx < animation.last_frame
+    do: |
+      tm1637_segments_enqueue(animation.frames[animation.frame_idx]);
+      ++animation.frame_idx;
+      timer_set(2500, delay_timer());
+
+  - from: animate
+    when: timer
+    do: |
+      tm1637_segments_enqueue(animation.frames[animation.frame_idx]);
+      animation.frame_idx = 0;
+      timer_set(2500, delay_timer());
+
+  - from: animate
+    when: show_cont_mode
+    do: |
+      animation.frames[0] = 0x09000009; 
+      animation.frames[1] = 0x10010802; 
+      animation.frames[2] = 0x20080104; 
+      animation.frames[3] = 0x09000009; 
+      animation.frames[4] = 0x10010802; 
+      animation.frames[5] = 0x20080104; 
+      animation.last_frame = 5;
+      animation.frame_idx = 0;
+
+  - from: animate
+    when: show_motor_right
+    do: |
+      animation.frames[0] = 0x79404040; 
+      animation.frames[1] = 0x40794040; 
+      animation.frames[2] = 0x40407940; 
+      animation.frames[3] = 0x40404079; 
+      animation.frames[4] = 0x40404040; 
+      animation.frames[5] = 0x40404046; 
+      animation.frames[6] = 0x49404040; 
+      animation.last_frame = 6;
+      animation.frame_idx = 0;
+
+  - from: animate
+    when: show_motor_left
+    do: |
+      animation.frames[0] = 0x40404049;
+      animation.frames[1] = 0x4040404F;
+      animation.frames[2] = 0x40404F40;
+      animation.frames[3] = 0x404F4040;
+      animation.frames[4] = 0x4F404040;
+      animation.frames[5] = 0x70404040;
+      animation.frames[6] = 0x40404040;
+      animation.last_frame = 6;
+      animation.frame_idx = 0;
+
+  - from: animate
+    when: show_manual_mode
+    do: |
+      animation.frames[0] = 0x00332700;
+      animation.frames[1] = 0x00332700;
+      animation.frames[2] = 0x00063000;
+      animation.frames[3] = 0x00063000;
+      animation.last_frame = 3;
+      animation.frame_idx = 0;
+
+  - from: animate
+    when: show_pause
+    do: |
+      animation.frames[0] = 0x00000000;
+      animation.frames[1] = 0x00000000;
+      animation.frames[2] = 0x00063000;
+      animation.frames[3] = 0x00063000;
+      animation.last_frame = 3;
+      animation.frame_idx = 0;
+
+
+  - from: animate
+    when: show_parameter
+    do: |
+      animation.frames[0] = (digitToSegment[16] << 24) | num_to_segs(idx, 0);
+      animation.frames[1] = animation.frames[0];
+      animation.frames[2] = (digitToSegment[16] << 24);
+      animation.last_frame = 2;
+      animation.frame_idx = 0;
+
+  - from: animate
+    when: show_number
+    do: |
+      animation.frames[0] = num_to_segs(num, 0);
+      animation.last_frame = 0;
+      animation.frame_idx = 0;
+
+  - from: animate
+    when: show_time
+    do: |
+      animation.frames[0] = (num_to_segs(hh, 0) << 16) | (num_to_segs(mm, 2));
+      animation.frames[1] = animation.frames[0];
+      animation.frames[2] = animation.frames[0] | 0x00800000;
+      animation.frames[3] = animation.frames[2];
+      animation.last_frame = 3;
+      animation.frame_idx = 0;
+
+  - from: animate
+    when: show_interval_mode
+    do: |
+      animation.frames[0] = (num_to_segs(mm/60, 0) << 16) | (num_to_segs(mm%60, 2)) | 0x00800000;
+      animation.frames[1] = animation.frames[0];
+      animation.frames[2] = 0x00800000;
+      animation.frames[3] = animation.frames[2];
+      animation.last_frame = 3;
+      animation.frame_idx = 0;
+
+  - from: animate
+    when: show_interval_pause
+    do: |
+      animation.frames[0] = (num_to_segs(mm/60, 0) << 16) | (num_to_segs(mm%60, 2));
+      animation.frames[1] = animation.frames[0];
+      animation.frames[2] = animation.frames[0] | 0x00800000;
+      animation.frames[3] = animation.frames[2];
+      animation.last_frame = 3;
+      animation.frame_idx = 0;
+
+  - from: animate
+    when: show_error
+    do: |
+      animation.frames[0] = (digitToSegment[14] << 24) | (digitToSegment[19] << 16) |
+                            (digitToSegment[19] << 8);
+      animation.frames[1] = animation.frames[0];
+      animation.frames[2] = num_to_segs(code, 4);
+      animation.frames[3] = animation.frames[2];
+      animation.last_frame = 3;
+      animation.frame_idx = 0;

@@ -272,8 +272,114 @@ actions in transitions/enter/exit and init/deinit.
 Using this method of composition we can effectively share inner FSMs, just generate them as
 'dynamic' type with explicitely exposed state variables.
 
+## FSM parametrization
+
+To reuse FSM specs between projects a good way of parametrization is needed.
+Say we have a driver of a display, but in one project it is connected to one set of pins,
+and in other project to a different set of pins. And, essentially, we want to reuse driver
+without any modifications in specs, only by parametrization in upper code.
+Parametrization may be done by passing an FSM, in which we will abstract pins, etc.
+Here we have a question about FSM signatures (types) and subtyping relation.
+
+## Common event queue
+
+Make FSM specs parameterized by event queue, so all FSM can share the same event
+queue.
+
+It is very desirable in small embedded systems.
+
+## Event processing optimization
+
+FSM compiler can do:
+1. Automatically decide when to make call from one event handler to
+   another syncronous/asyncronous using call graph information.
+2. Automatically introduce intermediate internal events to split
+   big 'do' sections into smaller ones via extra async events.
+   In this case we should be able to manage evets queue to put
+   this events on top of queue.
+
+## Event priorities
+
+We may introduce event priorities and their inheritance during
+chain of async event calls.
+
+## Passing parameters to event closures
+
+    closure = delay_display_time(hh, mm) -> closure()
+    closure = delay_display_time(hh) -> closure(mm)
+
+For c-code generation it requires generation a set of functions for event handler closure
+generation  and possible some code preprocessing.
+
 ## To simplify things remove support of 'static' type of FSM
 
 There are many complications in code generation for static type of FSM.
 User can always statically allocate state variables and pass them around during
 calls to FSM functions.
+
+## Event handling issues
+
+1. Direct calls from one event handler to others may lead to deadlocks or missing,
+   improperly handled events
+
+   Standard sequence of event handler execution:
+   1. check fsm1.state_num == fsm1.state1 (assume true)
+   2. execute fsm1 state1 exit_code
+   3. execute fsm1 event hanlder actions ---+
+   [ 3a. fsm1 state_num = fsm1.state2 ]     |
+   [ 3b. execute fsm1 state2 enter_code ]   |
+   4. fsm2_event call    <------------------+
+   5. fsm2.state_num == fsm2.stateN (assume true)
+   6. execute fsm2 stateN exit_code
+   7. execute fsm2 event actions handler ----+
+   [ 7a. fsm1 state_num = fsm1.state2 ]      |
+   [ 7b. execute fsm1 state2 enter_code ]    |
+   8. fsm1_event call     <------------------+
+   9. !!! problem here: fsm1 did not update state_num yet and not yet executed state2 enter code
+      i.e. fsm1 is inconsistent state!
+
+Note 3a, 3b, 7a, 7b missed steps in event processing.
+Syncronous calls between event handlers are very dangerous
+(loops may be far far not obvious), so every
+call between event handlers should go via event queue.
+
+2. storing several events in queue may give unexpected results, when
+   some events may be unhandled, because called fsm expects some other
+   events between them.
+   So, in transition actions, enter/exit state code it is strongly recommended
+   to store only one event for particular called fsm.
+
+3. Sequencing events handling and syncronization of fsms via callback events (see tm1637 driver code)
+   may lead to unexpected exausting of delayed event storage:
+   For instance 'done' event should have minimun size of storage for two 'done' delayed events.
+   Because storage is freed after event handler execution and if it try to allocate storage
+   for the event being processed it may observe storage shortage.
+   For instance: delayed 'done' event is fetched from queue and being executed, and
+   in the process of execution, it call to 'delay_done()' to get delayed self for passing
+   as callback to other fsm event handler. So, in this case there should be 2 blocks of mem
+   in delayed 'done' event storage.
+   Early freeing of storage before event is processed is dangerous when we work with by ref, not
+   by value.
+
+## Memory footprint optimization
+
+For small systems we may globally optimize a set of FSMs:
+1. For event closures we may use small numbers, instead of pointers.
+   In small embeded system it is quite common to have less than 256 cells for
+   event closures, so we may use just indices in arrays.
+2. Optimize event parameters storage: use unions, to share the same cell among
+   different event closures, etc
+3. Fine tune event parameters storage, event queue, etc for sizes, sharing parameters,
+   give these knobs to user.
+
+## Forbid delayed events that can be processed outside an event queue
+
+Delayed events during execution, should only put corresponding event in the event queue, not
+process event hanlder directly.
+
+Callbacks from one FSM to other FSM only via event queue.
+
+## Deactivate delayed events without execution
+
+For instance, we have a 'menu' FSM and call into it with two delayed events 'accept' and 'cancel'.
+When 'menu' FSM calls one callback event it should inactivate other event.

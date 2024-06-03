@@ -1,0 +1,210 @@
+name: motor
+type: static
+header:
+  prolog: |
+    #include "config.h"
+source:
+  prolog: |
+    #include "uart.h"
+    #include "protocol.h"
+    #include "timer.h"
+    #include "display.h"
+    #include "error_codes.h"
+    #include <stdio.h>
+
+    #define TIMEOUT 200000 // 20 sec
+    #define REQ_STATUS_PERIOD 10000 // 1 sec
+
+interrupts state type: uint32_t
+events:
+  timer:
+  timeout:
+  uart_send_complete:
+  rply_received:
+    - cmd: uint8_t
+    - val: uint32_t
+  rply_error:
+  start_left:
+    - on_stall: void*
+  start_right:
+    - on_stall: void*
+  stop:
+unhandled events: ignore
+delayed:
+  timer:
+    max: 2
+  timeout:
+    max: 2
+  uart_send_complete:
+    max: 1
+  rply_received:
+    max: 1
+  rply_error:
+    max: 1
+  start_left:
+    max: 1
+  start_right:
+    max: 1
+  stop:
+    max: 1
+queue: true
+state variables:
+  stall_cb:
+    void*: (void*)0
+  timer_cb:
+    void*: (void*)0
+  timeout_cb:
+    void*: (void*)0
+states:
+  wait:
+  req:
+  run_start:
+  run:
+  run_stop:
+  error:
+initial state: wait
+transitions:
+
+  - from: wait
+    to: run_start
+    when: start_right
+    do: |
+      stall_cb = on_stall;
+      send_req(CMD_MOTOR_START, 0);
+      timeout_cb = delay_timeout();
+      timer_set(TIMEOUT, timeout_cb);
+
+  - from: wait
+    to: run_start
+    when: start_left
+    do: |
+      stall_cb = on_stall;
+      send_req(CMD_MOTOR_START, 1);
+      timeout_cb = delay_timeout();
+      timer_set(TIMEOUT, timeout_cb);
+
+# starting
+
+  - from: run_start
+    to: run
+    when: rply_received
+    if: cmd == RPLY_STATUS && val == RPLY_RUN
+    do:  |
+      timer_remove(timeout_cb);
+      timer_cb = delay_timer();
+      timer_set(REQ_STATUS_PERIOD, timer_cb);
+
+  - from: run_start
+    to: wait
+    when: rply_received
+    if: cmd == RPLY_STATUS && val == RPLY_STALL
+    do:  |
+      timer_remove(timeout_cb);
+      __process_event(stall_cb);
+
+  - from: run_start
+    to: error
+    when: [timeout, rply_error]
+    do: |
+      __free_event(stall_cb);
+      timer_remove(timeout_cb);
+      display_show_error(ERR_UART);
+
+  - from: run_start
+    to: error
+    when: rply_received
+    if: cmd == RPLY_STATUS
+    do: |
+      __free_event(stall_cb);
+      timer_remove(timeout_cb);
+      display_show_error(ERR_MOTOR_SPINUP);
+
+  - from: run_start
+    to: error
+    when: rply_received
+    do: |
+      timer_remove(timeout_cb);
+      display_show_error(ERR_REPLY);
+
+# run
+  - from: run
+    when: timer
+    do: |
+      send_req(CMD_MOTOR_STATUS, 0);
+      timeout_cb = delay_timeout();
+      timer_set(TIMEOUT, timeout_cb);
+
+  - from: run
+    when: rply_received
+    if: cmd == RPLY_STATUS && val == RPLY_RUN
+    do:  |
+      timer_remove(timeout_cb);
+      timer_cb = delay_timer();
+      timer_set(REQ_STATUS_PERIOD, timer_cb);
+
+  - from: run
+    to: wait
+    when: rply_received
+    if: cmd == RPLY_STATUS && val == RPLY_STALL
+    do:  |
+      timer_remove(timeout_cb);
+      __process_event(stall_cb);
+
+  - from: run
+    to: error
+    when: [timeout, rply_error]
+    do: |
+      __free_event(stall_cb);
+      timer_remove(timeout_cb);
+      display_show_error(ERR_UART);
+
+  - from: run
+    to: error
+    when: rply_received
+    do: |
+      __free_event(stall_cb);
+      timer_remove(timeout_cb);
+      display_show_error(ERR_REPLY);
+
+# stopping
+
+  - from: run
+    to: run_stop
+    when: stop
+    do: |
+      send_req(CMD_MOTOR_STOP, 0);
+      timeout_cb = delay_timeout();
+      timer_set(TIMEOUT, timeout_cb);
+
+  - from: run_stop
+    to: wait
+    when: rply_received
+    if: cmd == RPLY_STATUS && (val == RPLY_STOP || val == RPLY_STALL)
+    do:  |
+      timer_remove(timeout_cb);
+      __process_event(stall_cb);
+
+  - from: run_stop
+    to: error
+    when: [timeout, rply_error]
+    do: |
+      __free_event(stall_cb);
+      timer_remove(timeout_cb);
+      display_show_error(ERR_UART);
+
+  - from: run_stop
+    to: error
+    when: rply_received
+    if: cmd == RPLY_STATUS
+    do: |
+      __free_event(stall_cb);
+      timer_remove(timeout_cb);
+      display_show_error(ERR_MOTOR_SPINDOWN);
+
+  - from: run_stop
+    to: error
+    when: rply_received
+    do: |
+      timer_remove(timeout_cb);
+      display_show_error(ERR_REPLY);
+

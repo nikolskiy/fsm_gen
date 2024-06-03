@@ -17,6 +17,8 @@ events:
   set:
     - timeout: uint32_t
     - delayed_event: void*
+  remove:
+    - delayed_event: void*
 unhandled events: ignore
 delayed:
   clock:
@@ -45,6 +47,15 @@ transitions:
         if (timers[i].time==0){
           timers[i].time = timeout;
           timers[i].event = delayed_event;
+          return;
+        }
+      }
+  - when: remove
+    do: |
+      for(int i=0; i<MAX_TIMERS; ++i) {
+        if (timers[i].event==delayed_event){
+          __free_event(delayed_event);
+          timers[i].time = 0;
           return;
         }
       }

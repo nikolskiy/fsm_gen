@@ -1,0 +1,186 @@
+name: menu_mode
+type: static
+header:
+  prolog: |
+    #include "config.h"
+    #include <stdio.h>
+source:
+  prolog: |
+    #include "display.h"
+    #include "system_state.h"
+    #include "timer.h"
+    #include "menu_cfg.h"
+
+    #define INTERVAL_MIN 30
+    #define INTERVAL_MAX 480
+    #define INTERVAL_STEP 15
+
+    // moved to functions because of conflict beteen macro 
+    // 'mode' and 'interval' and corresponding global_state
+    // fields
+    void set_global_state(mode_type mode, uint16_t interval)
+    {
+        global_state.mode = mode;
+        global_state.interval = interval;
+    }
+
+    void get_global_state(mode_type* mode, uint16_t* interval)
+    {
+        *mode = global_state.mode;
+        *interval = global_state.interval;
+    }
+
+interrupts state type: uint32_t
+events:
+  enter_menu:
+    - cb_ok: void*
+    - cb_cancel: void*
+  exit_menu_cancel:
+  button_press:
+  button_release:
+  button_longpress:
+  encoder_cw:
+  encoder_ccw:
+  show_mode:
+  config_return:
+delayed:
+  enter_menu:
+    max: 1
+  exit_menu_cancel:
+    max: 1
+  button_press:
+    max: 1
+  button_release:
+    max: 1
+  button_longpress:
+    max: 1
+  encoder_cw:
+    max: 1
+  encoder_ccw:
+    max: 1
+  show_mode:
+    max: 1
+  config_return:
+    max: 1
+queue: true
+unhandled events: ignore
+state variables:
+  exit_menu_callback_accept:
+    void*: ((void*)0)
+  exit_menu_callback_cancel:
+    void*: ((void*)0)
+  timer_callback:
+    void*: ((void*)0)
+  mode:
+    mode_type: MANUAL_MODE
+  interval:
+    uint16_t: INTERVAL_MIN
+states:
+  wait:
+  menu:
+  config:
+initial state: wait
+transitions:
+  - from: wait
+    to: menu 
+    when: enter_menu
+    if: cb_ok != ((void*)0) && cb_cancel != ((void*)0)
+    do: |
+      exit_menu_callback_accept = cb_ok;
+      exit_menu_callback_cancel = cb_cancel;
+      timer_callback = delay_exit_menu_cancel();
+      timer_set(600000, timer_callback);
+      get_global_state(&mode, &interval);
+      enqueue_show_mode();
+
+  - from: menu
+    when: show_mode
+    if: mode == MANUAL_MODE
+    do: display_show_manual_mode();
+
+  - from: menu
+    when: show_mode
+    if: mode == CONT_MODE
+    do: display_show_cont_mode();
+
+  - from: menu
+    when: show_mode
+    if: mode == INTERVAL_MODE
+    do: display_show_interval_mode(interval);
+
+  - from: menu
+    when: encoder_cw
+    if: mode == MANUAL_MODE
+    do: |
+      mode = CONT_MODE;
+      enqueue_show_mode();
+
+  - from: menu
+    when: encoder_cw
+    if: mode == CONT_MODE
+    do: |
+      mode = INTERVAL_MODE;
+      interval = INTERVAL_MIN;
+      enqueue_show_mode();
+
+  - from: menu
+    when: encoder_cw
+    if: mode == INTERVAL_MODE && interval <= INTERVAL_MAX
+    do: |
+      interval += INTERVAL_STEP;
+      enqueue_show_mode();
+
+  - from: menu
+    when: encoder_ccw
+    if: mode == INTERVAL_MODE && interval > INTERVAL_MIN
+    do: |
+      interval -= INTERVAL_STEP;
+      enqueue_show_mode();
+
+  - from: menu
+    when: encoder_ccw
+    if: mode == INTERVAL_MODE
+    do: |
+      mode = CONT_MODE;
+      enqueue_show_mode();
+
+  - from: menu
+    when: encoder_ccw
+    if: mode == CONT_MODE
+    do: |
+      mode = MANUAL_MODE;
+      interval = 5;
+      enqueue_show_mode();
+
+  - from: menu
+    when: encoder_ccw
+    if: mode == MANUAL_MODE && interval > 0
+    do: --interval;
+
+  - from: menu
+    to: config
+    when: encoder_ccw
+    if: mode == MANUAL_MODE
+    do: menu_cfg_enter_menu_enqueue(delay_config_return());
+
+  - from: config
+    to: menu
+    when: config_return
+    do: enqueue_show_mode();
+
+  - from: menu
+    to: wait
+    when: button_release
+    do: |
+      set_global_state(mode, interval);
+      timer_remove(timer_callback);
+      __free_event(exit_menu_callback_cancel);
+      __process_event(exit_menu_callback_accept);
+
+  - from: menu
+    to: wait
+    when: button_longpress
+    do: |
+      timer_remove(timer_callback);
+      __free_event(exit_menu_callback_accept);
+      __process_event(exit_menu_callback_cancel);

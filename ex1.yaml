@@ -52,7 +52,6 @@ name: example1
 
 type: dynamic
 
-
 # -----------------------
 # Code generation options
 # -----------------------
@@ -82,10 +81,11 @@ source:
   prolog: |
     #include <stdio.h>
     #include <stdlib.h>
+    #include <stdint.h>
   epilog: |
     // to siplify testing
     int main() {
-        example1_state_variables fsm;
+        example1_state_variables_type fsm;
         example1_init(&fsm);
         example1_tick_enqueue(&fsm);
         example1_tick_enqueue(&fsm);
@@ -242,7 +242,7 @@ queue: true
 # ignore/halt are self-descriptional
 
 #unhandled events: ignore
-unhandled events: halt
+#unhandled events: halt
 
 #unhandled events: |
 #  // user can place here specific code
@@ -258,11 +258,12 @@ unhandled events: halt
 # '*' name is reserved as default reaction for other
 # events, which are not mentioned in dict 
 
-#unhandled events:
-#  event1: ignore
-#  event2: |
-#    // user code as for common handlers
-#  *: ignore
+unhandled events:
+  event1: ignore
+  event2: |
+    // user code as for common handlers
+  "*": |
+    // 1234
 
 # --------------------------
 # state variables definition

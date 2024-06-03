@@ -1,0 +1,118 @@
+name: menu_cfg
+type: static
+header:
+  prolog: |
+    #include "config.h"
+source:
+  prolog: |
+    #include <stdio.h>
+    #include "display.h"
+    #include "timer.h"
+    #include "system_state.h"
+    #include "menu_mode.h"
+
+interrupts state type: uint32_t
+events:
+  enter_menu:
+    - cb_exit: void*
+  exit_menu:
+  button_press:
+  button_release:
+  button_longpress:
+  encoder_cw:
+  encoder_ccw:
+  show:
+delayed:
+  enter_menu:
+    max: 1
+  exit_menu:
+    max: 1
+  button_press:
+    max: 1
+  button_release:
+    max: 1
+  button_longpress:
+    max: 1
+  encoder_cw:
+    max: 1
+  encoder_ccw:
+    max: 1
+  show:
+    max: 1
+queue: true
+unhandled events: ignore
+state variables:
+  exit_menu_callback:
+    void*: ((void*)0)
+  timer_callback:
+    void*: ((void*)0)
+  index:
+    int: 0
+states:
+  wait:
+  param:
+  value:
+initial state: wait
+transitions:
+  - from: wait
+    to: param
+    when: enter_menu
+    if: cb_exit != ((void*)0)
+    do: |
+      exit_menu_callback = cb_exit;
+      timer_callback = delay_exit_menu();
+      timer_set(3000000, timer_callback);
+      enqueue_show();
+
+  - from: param
+    when: show
+    do: display_show_parameter(index);
+
+  - from: param
+    to: wait
+    when: [exit_menu, button_longpress]
+    do: |
+      timer_remove(timer_callback);
+      __process_event(exit_menu_callback);
+
+  - from: param
+    when: encoder_cw
+    if: index < __LAST_PARAMETER
+    do: |
+      ++index;
+      enqueue_show();
+
+  - from: param
+    when: encoder_ccw
+    if: index > 0
+    do: |
+      --index;
+      enqueue_show();
+
+  - from: value
+    when: show
+    do: display_show_number(system_config.parameters[index].val);
+
+  - from: param
+    to: value
+    when: button_release
+    do: enqueue_show();
+
+  - from: value
+    to: param
+    when: button_release
+    do: enqueue_show();
+
+  - from: value
+    when: encoder_cw
+    if: system_config.parameters[index].val < system_config.parameters[index].max
+    do: |
+      ++system_config.parameters[index].val;
+      enqueue_show();
+
+  - from: value
+    when: encoder_ccw
+    if: system_config.parameters[index].val > system_config.parameters[index].min
+    do: |
+      --system_config.parameters[index].val;
+      enqueue_show();

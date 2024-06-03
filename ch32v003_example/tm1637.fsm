@@ -3,141 +3,121 @@ type: static
 header:
   prolog: |
     #include "config.h"
-    #include "stdio.h"
 source:
   prolog: |
-    #define process_event(E) (*((void(**)(void*))E))(E)
-    #define i2c_c(d) funDigitalWrite(PA2, d ? FUN_HIGH:FUN_LOW)
-    #define i2c_d(d) funDigitalWrite(PA3, d ? FUN_HIGH:FUN_LOW)
+    #include <stdio.h>
+    #include "tm1637_i2c.h"
+    #define COMM1 0x40
+    #define COMM2 0xC0
+    #define COMM3 0x80
 interrupts state type: uint32_t
-init: |
-  funGpioInitAll();
-  funPinMode(PA2, GPIO_CFGLR_OUT_10Mhz_OD);
-  funPinMode(PA3, GPIO_CFGLR_OUT_10Mhz_OD);
 events:
-  clock:
-  send:
-    - e_data: uint8_t
-    - e_callback: void*
-  start:
-    - e_callback: void*
-  stop:
-    - e_callback: void*
-unhandled events: ignore
+  segments:
+    - e_data: uint32_t
+  brightness:
+    - val: uint8_t
+  done:
 delayed:
-  clock:
+  done:
+    max: 2
+  segments:
+    max: 2
+  brightness:
     max: 2
 queue: true
+unhandled events: ignore
 state variables:
   data:
-    uint16_t: 0
-  callback:
-    void*: ((void*)0)
+    uint32_t: 0
+  bytes:
+    uint8_t: 0
+  brightness:
+    uint8_t: 0
 states:
   wait:
-  start:
-  stop:
-  send:
-  send_:
+  send_brightness_start:
+  send_brightness:
+  send_brightness_stop:
+
+  send_command_comm1_start:
+  send_command_comm1:
+  send_command_comm1_stop:
+  send_command_comm2_start:
+  send_data:
+  send_stop:
 initial state: wait
 transitions:
 
-# START
+# brightness
 
   - from: wait
-    to: start
-    when: start
+    to: send_brightness_start
+    when: brightness
     do: |
-      callback = e_callback;
-      data = 2;
-      i2c_c(1);
-      i2c_d(1);
+      brightness = val;
+      tm1637_i2c_start_enqueue(delay_done());
 
-  - from: start
-    when: clock
-    if: data == 2
+  - from: send_brightness_start
+    to: send_brightness
+    when: done
     do: |
-      --data;
-      i2c_d(0);
+      tm1637_i2c_send_enqueue(COMM3 | (brightness & 0x7) | (brightness > 0 ? 0x8 : 0), delay_done());
 
-  - from: start
-    when: clock
-    if: data == 1
-    do: |
-      --data;
-      i2c_c(0);
+  - from: send_brightness
+    to: send_brightness_stop
+    when: done
+    do: tm1637_i2c_stop_enqueue(delay_done());
 
-  - from: start
+  - from: send_brightness_stop
     to: wait
-    when: clock
-    if: data == 0
-    do: |
-      process_event(callback);
+    when: done
 
-# STOP
+# segments
 
   - from: wait
-    to: stop
-    when: stop
+    to: send_command_comm1_start
+    when: segments
     do: |
-      callback = e_callback;
-      data = 2;
-      i2c_c(0);
-      i2c_d(0);
+      data = ((e_data & 0xFFFF) << 16) | ((e_data >> 16));
+      data = ((data & 0x00FF00FF) << 8) | ((data & 0xFF00FF00) >> 8);
+      bytes = 4;
+      tm1637_i2c_start_enqueue(delay_done());
 
-  - from: stop
-    when: clock
-    if: data == 2
+  - from: send_command_comm1_start
+    to: send_command_comm1
+    when: done
+    do: tm1637_i2c_send_enqueue(COMM1, delay_done());
+
+  - from: send_command_comm1
+    to: send_command_comm1_stop
+    when: done
+    do: tm1637_i2c_stop_enqueue(delay_done());
+
+  - from: send_command_comm1_stop
+    to: send_command_comm2_start
+    when: done
+    do: tm1637_i2c_start_enqueue(delay_done());
+
+  - from: send_command_comm2_start
+    to: send_data
+    when: done
+    do: tm1637_i2c_send_enqueue(COMM2, delay_done());
+
+  - from: send_data
+    when: done
+    if: bytes > 0
     do: |
-      --data;
-      i2c_c(0);
-      i2c_d(1);
+      tm1637_i2c_send_enqueue(data & 0xFF, delay_done());
+      data >>= 8;
+      --bytes;
 
-  - from: stop
-    when: clock
-    if: data == 1
+  - from: send_data
+    to: send_stop
+    when: done
+    if: bytes == 0
     do: |
-      --data;
-      i2c_c(1);
-      i2c_d(1);
+      tm1637_i2c_stop_enqueue(delay_done());
 
-  - from: stop
+  - from: send_stop
     to: wait
-    when: clock
-    if: data == 0
-    do: |
-      process_event(callback);
-
-#SEND
-
-  - from: wait
-    to: send
-    when: send
-    do: |
-      data = 0x100 | e_data;
-      callback = e_callback;
-
-  - from: send
-    to: send_
-    when: clock
-    if: data > 0
-    do: |
-      i2c_d(data&0x1);
-      i2c_c(0);
-      data >>= 1;
-
-  - from: send_
-    to: send
-    when: clock
-    do: |
-      i2c_c(1);
-
-  - from: send
-    to: wait
-    when: clock
-    if: data == 0
-    do: |
-      process_event(callback);
-
-# SKIP CLOCK
-  - when: clock
+    when: done
