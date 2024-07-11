@@ -1,0 +1,22 @@
+site_name: VeriFSM
+
+docs_dir: ./docs
+site_dir: ./generated_docs_site
+
+theme:
+  name: 'material'
+  palette:
+    scheme: default
+    primary: indigo
+    accent: indigo
+  font:
+    text: Roboto
+    code: Roboto Mono
+
+plugins:
+  - search
+  - mkdocstrings
+  - literate-nav:
+      nav_file: README.md
+      implicit_index: true
+      tab_length: 2
