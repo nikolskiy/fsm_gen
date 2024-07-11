@@ -10,6 +10,7 @@ To lower dependency on compiler optimizations, some optimizations
 can be done in AST:
 1. Storing intermediate results of predicates:
 
+```
     if ((state_num == 2 | state_num == 3) && Predicate1) {
       ...
     }
@@ -27,7 +28,7 @@ can be done in AST:
     if (state_num_check_2_3_4 && Predicate2) {
       ...
     }
-    
+```    
 
 ## Give the user an ability to fully control naming scheme on code generation stage
 
@@ -53,7 +54,7 @@ So user should have a control over this moments.
 ## Symbolic names for state constants
 
 Currently only numbers are used, but for better source code readabily
-we may give theese numbers names.
+we may give these numbers names.
 
 ## User defined states enumeration
 
@@ -77,20 +78,24 @@ Observer is functions over state variables. Only pure expressions are allowed.
 
 It will help to make specification more readable, etc.
 
-     observers:
-       get_voltage:
-         uint32_t: ...expression over state variables...
-
+```yaml
+observers:
+  get_voltage:
+    uint32_t: ...expression over state variables...
+```
 Observers can be used by external code to get some information about FSM
 
+```yaml
      export observers:
        - get_voltage
+```
 
 ## Introduce predicates in specification
 
 This will help (and force to some extent) to give meaningful names for transition
 conditions, etc
 
+```yaml
      predicates:
        timeout: time > timeout_val
      export predicates:
@@ -103,10 +108,13 @@ conditions, etc
          if: timeout
          do: |
            ...
+```
 
 ## Control on inlining internal functions
 
+```
     static __INLINE__ void fsm_state_state1_enter()
+```
 
 ## Data types specifications
 
@@ -118,11 +126,13 @@ For instance:
    (maybe whithout '_t' suffix)
 2. structures/records
 
+```yaml
     records:
       - record1:
         - field1:
             uint8_t: 0
         - filed2: {uint32_t: 0xFF}
+```
 
 3. Initialization is mandatory for fields of primitive type like integers (
    or default to 0?), so transitively closing this initialization we will
@@ -131,17 +141,20 @@ For instance:
 4. Arrays are predefined objects with buit-in iterators, etc:
    Only fixed len?
 
-   arrays:
-     - int8arr:
-         type:
-           int8_t: 0
-         size: 16
-
+```yaml
+arrays:
+  - int8arr:
+      type:
+        int8_t: 0
+      size: 16
+```
    GCC-style array initialization?
 
 5. Destruct binding/access ?
-   {a = field1, b = field2[5], field3{ e=field5 ... } ... } = record2;
-   c = a + b + e;
+```
+{a = field1, b = field2[5], field3{ e=field5 ... } ... } = record2;
+c = a + b + e;
+```
 
 Questions:
 1. By ref/by val passing complex types, like records/arrays?
@@ -160,48 +173,50 @@ events. But what about other cases?
 
 Postponing events (enqueue_self):
 
-     - from: state1
-       to: state2
-       when: process_it
-       if: resources < 10
-       postpone:
+```yaml
+- from: state1
+  to: state2
+  when: process_it
+  if: resources < 10
+  postpone:
 
-     - from: state1:
-       to: state2
-       when: process_it
-       do: |
-         ...
+- from: state1:
+  to: state2
+  when: process_it
+  do: |
+    ...
+```
 
-
-This obviousle equv to changing events order and to extend other transitions
-(state1->stae2:process_it) conditions by adding 'resources>=10'.
-But it is not fully behav equv: what if resources >= 10 is not reached?
+This obviously equal to changing events order and to extend other transitions
+`(state1->state2:process_it)` conditions by adding `resources>=10`.
+But it is not fully behave equivalent: what if resources >= 10 is not reached?
 And rearranging of incoming events means that we alter reason->consequence
 relation between an FSM and an external environment.
 Esp. taking into account handling of unhandled events.
-Without postoponing we may reach a halt of the system, but with postponing
+Without postponing we may reach a halt of the system, but with postponing
 we can avoid the halt.
 
 Or even worse:
+```yaml
+- from: state1
+  to: state2
+  when: process_it
+  if: resources < 10
+  do: |
+    ... alter state variables ...
+    enqueue_self()
 
-     - from: state1
-       to: state2
-       when: process_it
-       if: resources < 10
-       do: |
-         ... alter state variables ...
-         enqueue_self()
-
-     - from: state1:
-       to: state2
-       when: process_it
-       do: |
-         ...
+- from: state1:
+  to: state2
+  when: process_it
+  do: |
+    ...
+```
 
 Here we not only postpone event processing, but also alter the state before it.
 
 In general an ability to make and call closures of event processing raises many
-difficult questions of relation between practice and theary.
+difficult questions of relation between practice and theory.
 
 In practice, closures, etc are very useful for reactive control systems.
 
@@ -209,6 +224,7 @@ In practice, closures, etc are very useful for reactive control systems.
 
 In practice it may be useful to share some common code between all branches:
 
+```yaml
     - when: tick
       fallthrough:
       do: |
@@ -220,42 +236,46 @@ In practice it may be useful to share some common code between all branches:
       if: ticks > 5
       do: |
         ...
+```
 
-Pros: siplify sharing common code between transition actions in event handler.
+Pros: simplify sharing common code between transition actions in event handler.
 Cons: breaks theory. What if no other conditions are met and we get into unhandled
-event handler? Behaviours are not similar.
+event handler? Behaviors are not similar.
 
 An almost equiv to the example above:
+```yaml
+- from: state1
+  to: state2
+  when: tick
+  if: ticks > 5
+  do: |
+    ...
 
-    - from: state1
-      to: state2
-      when: tick
-      if: ticks > 5
-      do: |
-        ...
-
-    - when: tick
-      do: |
-        ++tick;
-        enqueue_self();
+- when: tick
+  do: |
+    ++tick;
+    enqueue_self();
+```
 
 Which also have issues with theoretical semantics.
 
 ## Hierarchical states
 
+```yaml
+states:
+  state1:
+    enter: |
+      ...
     states:
-      state1:
+      substate1:
+      substate2:
         enter: |
           ...
-        states:
-          substate1:
-          substate2:
-            enter: |
-              ...
-            exit: |
-              ...
+        exit: |
+          ...
+```
 
-At first sight it is an equv to cartesian product of transitions with corresponding merging of actions and state enter/exit code.
+At first sight it is an equivalent to cartesian product of transitions with corresponding merging of actions and state enter/exit code.
 
 ## FSM composition
 
@@ -265,12 +285,12 @@ One possible approach is to include one FSM into another like record fields of r
 It is clear how to compose state variable records, but what to do with event handling?
 Possible solution it to totally hide inner FSM, and all events to it can only be generated by
 outer FSM.
-I believe that in this case FSMs composition is equiv to somwhat altered outer FSM: we can consider
+I believe that in this case FSMs composition is equiv to somewhat altered outer FSM: we can consider
 the composition as outer FSM with some extra transitions, updates of conditions and extensions to
 actions in transitions/enter/exit and init/deinit.
 
 Using this method of composition we can effectively share inner FSMs, just generate them as
-'dynamic' type with explicitely exposed state variables.
+'dynamic' type with explicitly exposed state variables.
 
 ## FSM parametrization
 
@@ -292,10 +312,10 @@ It is very desirable in small embedded systems.
 
 FSM compiler can do:
 1. Automatically decide when to make call from one event handler to
-   another syncronous/asyncronous using call graph information.
+   another synchronous/asynchronous using call graph information.
 2. Automatically introduce intermediate internal events to split
    big 'do' sections into smaller ones via extra async events.
-   In this case we should be able to manage evets queue to put
+   In this case we should be able to manage events queue to put
    this events on top of queue.
 
 ## Event priorities
@@ -305,8 +325,10 @@ chain of async event calls.
 
 ## Passing parameters to event closures
 
-    closure = delay_display_time(hh, mm) -> closure()
-    closure = delay_display_time(hh) -> closure(mm)
+```
+closure = delay_display_time(hh, mm) -> closure()
+closure = delay_display_time(hh) -> closure(mm)
+```
 
 For c-code generation it requires generation a set of functions for event handler closure
 generation  and possible some code preprocessing.
@@ -323,6 +345,8 @@ calls to FSM functions.
    improperly handled events
 
    Standard sequence of event handler execution:
+
+```
    1. check fsm1.state_num == fsm1.state1 (assume true)
    2. execute fsm1 state1 exit_code
    3. execute fsm1 event hanlder actions ---+
@@ -337,9 +361,10 @@ calls to FSM functions.
    8. fsm1_event call     <------------------+
    9. !!! problem here: fsm1 did not update state_num yet and not yet executed state2 enter code
       i.e. fsm1 is inconsistent state!
+```
 
 Note 3a, 3b, 7a, 7b missed steps in event processing.
-Syncronous calls between event handlers are very dangerous
+Synchronous calls between event handlers are very dangerous
 (loops may be far far not obvious), so every
 call between event handlers should go via event queue.
 
@@ -349,9 +374,9 @@ call between event handlers should go via event queue.
    So, in transition actions, enter/exit state code it is strongly recommended
    to store only one event for particular called fsm.
 
-3. Sequencing events handling and syncronization of fsms via callback events (see tm1637 driver code)
-   may lead to unexpected exausting of delayed event storage:
-   For instance 'done' event should have minimun size of storage for two 'done' delayed events.
+3. Sequencing events handling and synchronization of FSMs via callback events (see tm1637 driver code)
+   may lead to unexpected exhausting of delayed event storage:
+   For instance 'done' event should have minimum size of storage for two 'done' delayed events.
    Because storage is freed after event handler execution and if it try to allocate storage
    for the event being processed it may observe storage shortage.
    For instance: delayed 'done' event is fetched from queue and being executed, and
@@ -365,7 +390,7 @@ call between event handlers should go via event queue.
 
 For small systems we may globally optimize a set of FSMs:
 1. For event closures we may use small numbers, instead of pointers.
-   In small embeded system it is quite common to have less than 256 cells for
+   In small embedded system it is quite common to have less than 256 cells for
    event closures, so we may use just indices in arrays.
 2. Optimize event parameters storage: use unions, to share the same cell among
    different event closures, etc
@@ -375,7 +400,7 @@ For small systems we may globally optimize a set of FSMs:
 ## Forbid delayed events that can be processed outside an event queue
 
 Delayed events during execution, should only put corresponding event in the event queue, not
-process event hanlder directly.
+process event handler directly.
 
 Callbacks from one FSM to other FSM only via event queue.
 
