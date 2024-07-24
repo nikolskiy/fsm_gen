@@ -1,0 +1,35 @@
+[tool.poetry]
+name = "fsm-gen"
+version = "0.1.0"
+description = "C-code FSM generator from YAML specifications"
+authors = [
+    "vasil-sd",
+]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+
+[tool.poetry.group.docs]
+[tool.poetry.group.docs.dependencies]
+# Documentation management
+mkdocs= "^1.6.0"
+
+# Material theme for mkdocs
+# https://squidfunk.github.io/mkdocs-material/getting-started/
+mkdocs-material = "^9.5.28"
+
+# For auto-generating documentation from docstrings in code
+# https://mkdocstrings.github.io/
+mkdocstrings = "^0.25.1"
+mkdocstrings-python = "^1.10.5"
+
+# Navigation
+# https://oprypin.github.io/mkdocs-literate-nav/index.html
+mkdocs-literate-nav = "^0.6.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
