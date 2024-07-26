@@ -1,2 +1,4 @@
 generated_docs_site
 .venv/
+__pycache__
+*.pyc

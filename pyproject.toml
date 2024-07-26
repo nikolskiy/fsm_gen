@@ -7,6 +7,10 @@ authors = [
 ]
 license = "MIT"
 readme = "README.md"
+packages = [
+    { include = "cli" },
+    { include = "pyfsm" },
+]
 
 [tool.poetry.dependencies]
 python = "^3.12"
@@ -29,7 +33,14 @@ mkdocstrings-python = "^1.10.5"
 # https://oprypin.github.io/mkdocs-literate-nav/index.html
 mkdocs-literate-nav = "^0.6.1"
 
+[tool.poetry.group.cli]
+[tool.poetry.group.cli.dependencies]
+typer = {extras = ["all"], version = "^0.12.3"}
+
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+fsm = "cli.main:app"
