@@ -26,6 +26,14 @@ fsm --help
 
 to see available options.
 
+Here is an example how to generate C code from a YAML file:
+
+```bash
+fsm c-from-yaml docs/ex1.yaml generated/ex1
+```
+
+Now checkout `generated/ex1` directory for generated files.
+
 # Build and serve documentation
 There is a documentation system based on [mkdocs](https://www.mkdocs.org/getting-started/).
 
