@@ -1,7 +1,3 @@
-#!/home/vasil/.nix-profile/bin/python
-
-import yaml
-import sys
 from dataclasses import dataclass
 
 
@@ -64,12 +60,6 @@ from dataclasses import dataclass
 #  14. state variables initialization of complex types structs, arrays, etc.
 #      type declaration with mandatory initialization?
 
-if len(sys.argv) != 2:
-    print("Usage: fsm_gen fsm.yaml")
-    exit(0)
-
-with open(sys.argv[1]) as f:
-    fsm = yaml.load(f, Loader=yaml.Loader)
 
 def validate(fsm):
     fsm['name'] = fsm.get('name', None)
@@ -122,7 +112,52 @@ def validate(fsm):
     fsm['disable interrupts'] = fsm.get('disable interrupts', '___disable_interrupts')
     fsm['restore interrupts'] = fsm.get('restore interrupts', '___restore_interrupts')
 
+    fsm['events'] = {
+        e: (params if isinstance(params, list) else [])
+        for e, params in fsm['events'].items()
+      }
+
+    fsm['states'] = {
+        s: ({'enter': body.get('enter',None), 'exit': body.get('exit', None)} if isinstance(body, dict) else {'enter': None, 'exit':None})
+        for s, body in fsm['states'].items()
+      }
+
+    if fsm['state variables'] is None:
+        fsm['state variables'] = dict()
+
+    # TODO: account user specified 'num' field
+
+    fsm['state_by_num'] = dict()
+
+    for idx, key in enumerate(fsm['states'].keys()):
+        fsm['states'][key]['num'] = idx
+        fsm['state_by_num'][idx] = key
+
+    fsm['delayed_event_params_name'] = \
+        lambda ename: f"{fsm['name prefix']}_delayed_{ename}_params"
+
+    fsm['delayed_event_params_type'] = \
+        lambda ename: f"{fsm['name prefix']}_delayed_{ename}_params_type"
+
+    fsm['delayed_event_handler_variable_name'] = \
+        f"{fsm['name prefix']}_delayed_event_handler"
+
+    naming = Naming(fsm)
+    state = StateVariables(fsm, naming)
+    queue = EventQueue(naming,  sum([c['max'] for _,c in fsm['delayed'].items()]) + 1)
+    queue.state(state)
+    queue.set_sync(Sync(naming.inner, "uint32_t", "___disable_interrupts", "___restore_interrupts"))
+
+    events = [{'name': n, 'params': p if p is not None else [], 'unhandled': get_unhandled(fsm,n) }
+              for n, p in fsm['events'].items()]
+
+    events = { e['name']: Event(naming, state, e) for e in events}
+
+    fsm['__state'] = state
+    fsm['__queue'] = queue
+    fsm['__events'] = events
     return fsm
+
 
 def indent(text, level=1):
     for i in range(level):
@@ -138,11 +173,13 @@ def indent(text, level=1):
 def param_name(p):
     return list(p)[0]
 
+
 def param_type(p):
     t = list(p.values())[0]
     if isinstance(t, dict):
         return list(t)[0]
     return t
+
 
 def param_value(p):
     t = list(p.values())[0]
@@ -150,43 +187,17 @@ def param_value(p):
         return list(t.values())[0]
     return None
 
+
 def to_c_signature_str(params):
     return ", ".join([f"{param_type(p)} {param_name(p)}" for p in params])
+
 
 def is_equal_sigs(s1, s2):
     return to_c_signature_str(s1) == to_c_signature_str(s2)
 
-fsm['events'] = {
-    e: (params if isinstance(params, list) else [])
-    for e, params in fsm['events'].items()
-  }
-
-fsm['states'] = {
-    s: ({'enter': body.get('enter',None), 'exit': body.get('exit', None)} if isinstance(body, dict) else {'enter': None, 'exit':None})
-    for s, body in fsm['states'].items()
-  }
-
-if fsm['state variables'] is None:
-    fsm['state variables'] = dict()
-
-# TODO: account user specified 'num' field
-
-fsm['state_by_num'] = dict()
-
-for idx, key in enumerate(fsm['states'].keys()):
-    fsm['states'][key]['num'] = idx
-    fsm['state_by_num'][idx] = key
-
-fsm['delayed_event_params_name'] = \
-    lambda ename: f"{fsm['name prefix']}_delayed_{ename}_params"
-
-fsm['delayed_event_params_type'] = \
-    lambda ename: f"{fsm['name prefix']}_delayed_{ename}_params_type"
-
-fsm['delayed_event_handler_variable_name'] = \
-    f"{fsm['name prefix']}_delayed_event_handler"
 
 def gen_delayed_struct_typedef(fsm, e_name, params):
+    state = fsm['__state']
     text = f"typedef struct {fsm['delayed_event_params_type']( e_name)}" + " {\n"
     params = [f"{param_type(p)} {param_name(p)}" for p in params]
     if fsm['type'] == 'dynamic':
@@ -196,18 +207,21 @@ def gen_delayed_struct_typedef(fsm, e_name, params):
     text += "} " + f"{fsm['delayed_event_params_type']( e_name)};\n"
     return text
 
+
 def get_delayed_events(fsm):
     if fsm['delayed'] is None:
         return []
     delayed = []
     for e, config in fsm['delayed'].items():
         params = fsm['events'][e]
-        delayed.append((e, config,fsm['events'][e]))
+        delayed.append((e, config, fsm['events'][e]))
     # events should be sorted for stable numbering scheme
     sorted(delayed, key=lambda x: x[0])
     return delayed
 
+
 def get_delayed_event_params_accessor(fsm, e_name):
+    state = fsm['__state']
     return state.access(fsm['delayed_event_params_name']( e_name))
 
 @dataclass
@@ -317,6 +331,7 @@ class StateVariables(Var):
         #result += f"typedef struct {state.typ}" + " {\n" + indent(variables) + "} " + f"{state.typ};\n"
         #return result
 
+
 @dataclass
 class Function:
     result_type: str
@@ -357,6 +372,7 @@ class Function:
                 params = self.state.name + ", " + params
         return f"{self.name}({params})"
 
+
 @dataclass
 class Sync:
     istate: Var
@@ -375,6 +391,7 @@ class Sync:
 {code}
 {self.restore}({self.istate.name});
 """
+
 
 @dataclass
 class EventQueue(Var):
@@ -447,10 +464,10 @@ typedef struct {self.typ} {{
 
     def __gen_enqueue_fun(self):
         if isinstance(self.state, StateVariables):
-            self.enqueue_fun = Function(naming.inner("event_enqueue___"), "int", [Var(naming.inner, "void*", "delayed_event")])
+            self.enqueue_fun = Function(self.naming.inner("event_enqueue___"), "int", [Var(self.naming.inner, "void*", "delayed_event")])
             self.enqueue_fun.state(self.state)
         else:
-            self.enqueue_fun = Function(naming.outer("event_enqueue"), "int", [Var(naming.inner, "void*", "delayed_event")])
+            self.enqueue_fun = Function(self.naming.outer("event_enqueue"), "int", [Var(self.naming.inner, "void*", "delayed_event")])
         param = self.enqueue_fun.params[0]
         self.enqueue_fun.body(f"if ({param.name} == {param.initval}) return 0;\n" +
           self.sync.under_disabled_interrupts(f"""\
@@ -503,6 +520,7 @@ class Event:
     def gen_handler_definition(self, transitions):
         pass
 
+
 @dataclass
 class DelayedEvent:
     event: Event
@@ -529,15 +547,11 @@ class EventParamsStorage(Var):
     def __gen_definition(self):
         pass
 
+
 class State:
     def __init__(self, fsm, s):
         pass
 
-naming = Naming(fsm)
-state = StateVariables(fsm, naming)
-queue = EventQueue(naming,  sum([c['max'] for _,c in fsm['delayed'].items()]) + 1)
-queue.state(state)
-queue.set_sync(Sync(naming.inner, "uint32_t", "___disable_interrupts", "___restore_interrupts"))
 
 def get_unhandled(fsm, e):
     ue = fsm['unhandled events']
@@ -545,12 +559,9 @@ def get_unhandled(fsm, e):
         return ue
     return ue.get(e, ue.get("*", "halt"))
 
-events = [{'name': n, 'params': p if p is not None else [], 'unhandled': get_unhandled(fsm,n) }
-          for n, p in fsm['events'].items()]
-
-events = { e['name']: Event(naming, state, e) for e in events}
 
 def gen_delayed_events_queue_initializer(fsm):
+    queue = fsm['__queue']
     delayed = get_delayed_events(fsm)
     if delayed == [] or not fsm['queue']:
         return ""
@@ -558,8 +569,10 @@ def gen_delayed_events_queue_initializer(fsm):
         queue.struct_initval
     return queue.initcode
 
+
 def gen_state_struct(fsm):
     fsm_name = fsm['name']
+    state = fsm['__state']
     initializers = [v.struct_initval for v in state.variables]
     variables = [v.decl for v in state.variables]
     # account for delayed events
@@ -574,9 +587,12 @@ def gen_state_struct(fsm):
     result += f"typedef struct {state.typ}" + " {\n" + indent(variables) + "} " + f"{state.typ};\n"
     return result
 
+
 def get_state_variables_init_vals(fsm):
+    state = fsm['__state']
     initializers = [v.struct_initval for v in state.variables]
     return initializers
+
 
 def get_delayed_struct_init_vals(fsm):
     initializers = dict()
@@ -584,16 +600,20 @@ def get_delayed_struct_init_vals(fsm):
         initializers[f"{fsm['delayed_event_params_name'](e)}"]="{" + ", ".join([f"{{.{fsm['delayed_event_handler_variable_name']}=((void(*)(void*))0)}}" for i in range(int(config['max']))]) + "}"
     return initializers
 
+
 def gen_state_struct_initializers(fsm):
     inits = get_state_variables_init_vals(fsm)
     delayed_inits = get_delayed_struct_init_vals(fsm)
+    queue = fsm('__queue')
     if len(delayed_inits) > 0:
         inits += [ f".{name}={val}" for name, val in delayed_inits.items()]
     if fsm['queue'] and fsm['delayed'] is not None:
         inits += [queue.struct_initval]
     return "\n" + indent(",\n".join(inits))
 
+
 def gen_header_prolog(fsm):
+    state = fsm['__state']
     fsm_name = fsm['name']
     header = fsm['header']
     text = f"#ifndef {fsm['name prefix']}_header__\n#define {fsm['name prefix']}_header__\n{header['prolog']}\n"
@@ -606,7 +626,9 @@ def gen_header_prolog(fsm):
         text += f"void {fsm_name}_deinit ({state.ref_typ});\n"
     return text
 
+
 def gen_state_names_function(fsm):
+    state = fsm['__state']
     text = f"static const char* {fsm['name prefix']}_get_state_name("
     text += "" if fsm['type'] == 'static' else f"const {state.ref_decl}"
     text += ")\n{\n"
@@ -617,9 +639,10 @@ def gen_state_names_function(fsm):
     text += "}\n"
     return text
 
+
 def gen_source_prolog(fsm):
-    source = fsm['source']
-    text = f"#include \"{header['file']}\"\n{source['prolog']}\n"
+    state = fsm['__state']
+    text = f"#include \"{fsm['header']['file']}\"\n{fsm['source']['prolog']}\n"
     if fsm['type'] == 'static':
         text += gen_state_struct(fsm);
         text += f"static {state.decl}" + " = { " + gen_state_struct_initializers(fsm) + "};\n"
@@ -650,8 +673,10 @@ def gen_source_prolog(fsm):
                     text += f"#define enqueue_{e}(...) {fsm['name']}_{e}_enqueue({state.name}, __VA_ARGS__)\n"
     return text
 
+
 def gen_call_to_state_entry_exit(fsm, idx, kind):
     call = None
+    state = fsm['__state']
     name = fsm['state_by_num'][idx]
     body = fsm['states'][name]
     if body[kind] is not None:
@@ -661,7 +686,12 @@ def gen_call_to_state_entry_exit(fsm, idx, kind):
             call = f"{fsm['name prefix']}_state_{name}_{kind} ({state.name})"
     return call
 
-def gen_exit_state_switch_case(fsm, state_nums, state_num = state.access(state.num)):
+
+def gen_exit_state_switch_case(fsm, state_nums, state_num = None):
+    state = fsm['__state']
+    if not state_num:
+        state_num = state.access(state.num)
+
     exits = [(num, gen_call_to_state_entry_exit(fsm, num, 'exit')) for num in state_nums]
     exits = [exit for exit in exits if exit[1] is not None]
     exits_code = ""
@@ -672,8 +702,9 @@ def gen_exit_state_switch_case(fsm, state_nums, state_num = state.access(state.n
         exits_code += "  default: break;\n}\n"
     return exits_code
 
+
 def gen_source_init_deinit(fsm):
-    source = fsm['source']
+    state = fsm['__state']
     text = ""
     initial_state_enter_call = gen_call_to_state_entry_exit(fsm, int(state.num.initval), 'enter') or ""
     #TODO generate state exit calls on deinit
@@ -694,13 +725,17 @@ def gen_source_init_deinit(fsm):
         text += f"void {fsm['name']}_deinit ({state.ref_decl})\n" + "{\n" + indent(gen_exit_state_switch_case(fsm, [s['num'] for s in fsm['states'].values()]) + fsm.get('deinit','')) + "}\n";
     return text
 
+
 def gen_source_unhandled_event_handlers(fsm):
+    events = fsm['__events']
     return "\n".join(
         [gen_state_names_function(fsm)] +
         [e.unhandled_handler.definition for e in events.values()])
 
+
 def gen_event_handler_signature(fsm, e):
     s = fsm['events'][e]
+    state = fsm['__state']
     sig = []
     if fsm['type'] != 'static':
         sig = [f"{state.ref_decl}"]
@@ -710,14 +745,17 @@ def gen_event_handler_signature(fsm, e):
     sig = ", ".join(sig)
     return sig
 
+
 def gen_event_handlers_definitions(fsm):
     text = ""
     for e, s in fsm['events'].items():
         text += f"void {fsm['name']}_{e} ({gen_event_handler_signature(fsm, e)});\n"
     return text
 
+
 def gen_states_entries_and_exits(fsm):
     text = ""
+    state = fsm['__state']
     for name, body in fsm['states'].items():
         def gen_code(kind):
             code = ""
@@ -732,7 +770,9 @@ def gen_states_entries_and_exits(fsm):
         text += gen_code('exit')
     return text
 
+
 def gen_call_to_transition_action(fsm, idx):
+    state = fsm['__state']
     tr = fsm['transitions'][idx]
     evt = tr['when']
     if isinstance(evt, list):
@@ -744,8 +784,10 @@ def gen_call_to_transition_action(fsm, idx):
     params = ", ".join(params)
     return f"{fsm['name prefix']}_transition_actions_{idx} ({params})"
 
+
 def gen_transition_actions(fsm):
     events = fsm['events']
+    state = fsm['__state']
     text = ""
     for idx, tr in enumerate(fsm['transitions']):
         evt = tr['when']
@@ -768,30 +810,39 @@ def gen_transition_actions(fsm):
             text += "{\n" + indent(tr['do']) + "}\n"
     return text
 
+
 def gen_unhandled_event_handler(fsm, event_name):
+    events = fsm['__events']
+    state = fsm['__state']
     e = events[event_name]
     if fsm['type'] == 'static':
         return e.unhandled_handler.call(e.handler.params + [f"{fsm['name prefix']}_get_state_name()" , f"\"{event_name}\""]) + ";\n"
     else:
         return e.unhandled_handler.call(e.handler.params + [f"{fsm['name prefix']}_get_state_name({state.name})" , f"\"{event_name}\""]) + ";\n"
 
+
 def gen_call_to_event_enqueue(fsm, e, params):
+    state = fsm['__state']
     params = [param_name(p) for p in params]
     if fsm['type'] == 'dynamic':
         params = [state.name] + params
     return f"{fsm['name']}_{e}_enqueue (" + ", ".join([p for p in params]) + ")"
+
 
 def gen_macro_enqueue_self(fsm, ename, params):
     if ename in fsm['delayed']:
         return f"#define enqueue_self() {gen_call_to_event_enqueue(fsm, ename, params)}"
     return ""
 
-def gen_end_of_macro_enqueue_self(fsn, ename):
+
+def gen_end_of_macro_enqueue_self(fsm, ename):
     if ename in fsm['delayed']:
         return f"#undef enqueue_self // for {ename}"
     return ""
 
+
 def gen_event_handlers(fsm):
+    state = fsm['__state']
     fsm_name = fsm['name']
     events = fsm['events']
     text = ""
@@ -905,6 +956,7 @@ void {fsm_name}_{evt_name} ({gen_event_handler_signature(fsm, evt_name)})
 
     return text
 
+
 def gen_delayed_event_handlers_definitions(fsm):
     delayed = get_delayed_events(fsm)
     if delayed == []:
@@ -914,6 +966,7 @@ def gen_delayed_event_handlers_definitions(fsm):
         text += f"void* {fsm['name']}_{e}_delayed ({gen_event_handler_signature(fsm, e)});\n"
     text += f"#define {fsm['name']}_process_delayed_event(E) (*((void(**)(void*))E))(E)\n"
     return text
+
 
 def gen_delayed_event_handlers(fsm):
     delayed = get_delayed_events(fsm)
@@ -929,7 +982,9 @@ def gen_delayed_event_handlers(fsm):
 #define ___disable_interrupts() 0
 #define ___restore_interrupts(...)
 """
+
     def gen_call_to_event_handler(fsm, e, params):
+        state = fsm['__state']
         params = [param_name(p) for p in params]
         if fsm['type'] == 'dynamic':
             params = [state.name] + params
@@ -939,6 +994,7 @@ def gen_delayed_event_handlers(fsm):
         return call
 
     def gen_delayed_struct_alloc_and_assignment(fsm, ename, config, params):
+        state = fsm['__state']
         params = [param_name(p) for p in params]
         array_len = config['max']
         code = f"""\
@@ -973,7 +1029,9 @@ void* {fsm['name']}_{ename}_delayed ({gen_event_handler_signature(fsm, ename)})
 """
     return text
 
+
 def gen_queued_event_handlers_definitions(fsm):
+    state = fsm['__state']
     delayed = get_delayed_events(fsm)
     if delayed == [] or not fsm['queue']:
         return ""
@@ -986,13 +1044,18 @@ def gen_queued_event_handlers_definitions(fsm):
         text += f"void {fsm['name']}_process_queue({state.ref_decl});\n"
     return text
 
+
 def gen_queued_event_handlers(fsm):
+    state = fsm['__state']
     delayed = get_delayed_events(fsm)
+
+    queue = fsm['__queue']
     if delayed == [] or not fsm['queue']:
         return ""
     text = "static " + queue.enqueue_fun.definition + "\n"
 
     def gen_call_to_event_delayed(fsm, e, params):
+        state = fsm['__state']
         params = [param_name(p) for p in params]
         if fsm['type'] == 'dynamic':
             params = [state.name] + params
@@ -1026,8 +1089,10 @@ void {fsm['name']}_{ename}_enqueue ({gen_event_handler_signature(fsm, ename)})
 """
     return text
 
+
 def gen_header_epilog(fsm):
     return f"\n{fsm['header']['epilog']}\n#endif // {fsm['name prefix']}_header__\n"
+
 
 def gen_source_epilog(fsm):
     text = ""
@@ -1063,13 +1128,17 @@ def build_source(fsm):
     return source_text
 
 
-def build(fsm, output):
+def generate(fsm):
     fsm = validate(fsm)
     header = build_header(fsm)
     source = build_source(fsm)
 
-with open(header['file'], "w") as f:
-    f.write(header_text)
+    return header, source
 
-with open(source['file'], "w") as f:
-    f.write(source_text)
+
+def get_header_file_name(fsm):
+    return fsm['header']['file']
+
+
+def get_source_file_name(fsm):
+    return fsm['source']['file']

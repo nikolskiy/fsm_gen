@@ -1,6 +1,6 @@
 {
     "cSpell.words": [
-        "fsm_gen", "typer"
+        "fsm_gen", "typer", "pyfsm"
     ],
     "files.trimFinalNewlines" : true,
     "files.insertFinalNewline" : true,
