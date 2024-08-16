@@ -1,7 +1,7 @@
+import importlib.metadata
 import typer
 import yaml
 from pathlib import Path
-
 from pyfsm import parser
 
 
@@ -13,6 +13,15 @@ def callback():
     """
     Finite State Machine CLI
     """
+
+
+@app.command()
+def version():
+    """
+    Display current version
+    """
+    version = importlib.metadata.version("fsm-gen")
+    print(f'fsm version {version}')
 
 
 @app.command()
