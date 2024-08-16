@@ -5,3 +5,5 @@ C-code FSM generator from YAML specifications
 * [Home](README.md)
 * [Future plans](plans.md)
 * [Research](research.md)
+* [Change Log](change-log.md)
+* [All tasks](tasks.md)

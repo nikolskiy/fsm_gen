@@ -1,4 +1,4 @@
-## Absctraction from an output language
+## Abstraction from an output language
 
 Possible solution here is using processing in two stages:
 1. Yaml -> AST
@@ -17,9 +17,9 @@ can be done in AST:
     if ((state_num == 2 | state_num == 3 | state_num == 4) && Predicate2) {
       ...
     }
-    
+
 =>
-    
+
     int state_num_check_2_3 = (state_num == 2 | state_num == 3);
     if ( state_num_check_2_3 && Predicate1) {
       ...
@@ -28,7 +28,7 @@ can be done in AST:
     if (state_num_check_2_3_4 && Predicate2) {
       ...
     }
-```    
+```
 
 ## Give the user an ability to fully control naming scheme on code generation stage
 
