@@ -5,7 +5,7 @@ can preserve the history of built features across multiple independent repositor
 
 # Add versioning support
 `fsm --version` should output the current version.
-We need the feature for [change log](./change-log.md) support.
+We need the feature for [change log](../change-log.md) support.
 
 # Add MarkDown support
 As of `v0.1.0` we can parse only yaml files.

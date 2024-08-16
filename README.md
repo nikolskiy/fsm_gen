@@ -1,14 +1,14 @@
-# Project description
+# Description
 
 C-code FSM generator from YAML specifications
 
-# Initial requirements for the project
+# Requirements
 
 You should have Python dependency manager called [Poetry](https://python-poetry.org/docs/) installed on your system.
 
 # Install
 
-From the root of the project run:
+Clone the project and from the root of the project run:
 
 ```bash
 poetry install
