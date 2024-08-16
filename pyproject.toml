@@ -33,6 +33,9 @@ mkdocstrings-python = "^1.10.5"
 # https://oprypin.github.io/mkdocs-literate-nav/index.html
 mkdocs-literate-nav = "^0.6.1"
 
+# Support inline markdown docs
+mkdocs-include-markdown-plugin = "^6.2.2"
+
 [tool.poetry.group.cli]
 [tool.poetry.group.cli.dependencies]
 typer = {extras = ["all"], version = "^0.12.3"}

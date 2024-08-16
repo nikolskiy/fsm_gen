@@ -16,6 +16,7 @@ theme:
 plugins:
   - search
   - mkdocstrings
+  - include-markdown
   - literate-nav:
       nav_file: README.md
       implicit_index: true

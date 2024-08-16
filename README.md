@@ -1,23 +1,27 @@
-# fsm_gen
+# Project description
+
 C-code FSM generator from YAML specifications
 
 # Initial requirements for the project
-You should have Python dependency management called [Poetry](https://python-poetry.org/docs/) installed on your system.
+
+You should have Python dependency manager called [Poetry](https://python-poetry.org/docs/) installed on your system.
 
 # Install
-From the root of the project
+
+From the root of the project run:
 
 ```bash
 poetry install
 ```
 
-Now you can activate the environment
+Now you can activate the environment:
 
 ```bash
 poetry shell
 ```
 
 # Run fsm CLI
+
 When the environment is activated you will have access to `fsm` CLI. Run
 
 ```bash
@@ -35,6 +39,7 @@ fsm c-from-yaml docs/ex1.yaml generated/ex1
 Now checkout `generated/ex1` directory for generated files.
 
 # Build and serve documentation
+
 There is a documentation system based on [mkdocs](https://www.mkdocs.org/getting-started/).
 
 You can start docs server locally by running:
