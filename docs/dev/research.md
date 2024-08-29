@@ -2,13 +2,15 @@
 
 This section contains info about trying approaches and libraries.
 
-Each section should have what is consider to add/update/remove, why, and the
+Each section should have what is considered to add/update/remove, why, and the
 final decision. Was it adapted or abandoned and why.
 
 # Use existing python FSM library
+## Adding
 Parse states into existing FSM library.
 A good candidate is [Python State Machine](https://python-statemachine.readthedocs.io/en/latest/). The project is active on [Github](https://github.com/fgmacedo/python-statemachine).
 
+## Why
 Most interesting features for us are:
 - Implemented States, Events, and Transitions
 - Conditional transitions
@@ -20,3 +22,6 @@ in Python. In our case we need to validate it and convert it into C code.
 C code generator can be a separate module that takes internal representation
 based on the FSM lib. Another module can provide extra validations by cycling
 through the states in Python. This also fits with the [optimization](./plans.md#optimizations-of-output-code) idea.
+
+## Final decision
+TBD

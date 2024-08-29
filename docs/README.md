@@ -1,7 +1,13 @@
-# Generate FSM
-C-code FSM generator from YAML specifications
+# Docs home
+
+Main documentation page.
+
+{% include-markdown "../README.md" %}
+
+# Main Navigation links
 
 <!--nav-->
-* [Home](README.md)
-* [Future plans](plans.md)
-* [Research](research.md)
+* [Docs home](./README.md)
+* [Example](./ex1.md)
+* [Change Log](./change-log.md)
+* [Dev](./dev/)

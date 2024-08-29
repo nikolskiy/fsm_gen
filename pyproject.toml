@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "fsm-gen"
-version = "0.1.0"
+version = "0.2.0"
 description = "C-code FSM generator from YAML specifications"
 authors = [
     "vasil-sd",
@@ -33,10 +33,16 @@ mkdocstrings-python = "^1.10.5"
 # https://oprypin.github.io/mkdocs-literate-nav/index.html
 mkdocs-literate-nav = "^0.6.1"
 
+# Support inline markdown docs
+mkdocs-include-markdown-plugin = "^6.2.2"
+
 [tool.poetry.group.cli]
 [tool.poetry.group.cli.dependencies]
 typer = {extras = ["all"], version = "^0.12.3"}
 
+[tool.poetry.group.tests]
+[tool.poetry.group.tests.dependencies]
+pytest = "^8.3.2"
 
 [build-system]
 requires = ["poetry-core"]
@@ -44,3 +50,9 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
 fsm = "cli.main:app"
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]
+pythonpath = "pyfsm"
