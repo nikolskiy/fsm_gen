@@ -41,7 +41,10 @@ def read_file(src:Path) -> str:
         with open(src, mode='r') as f:
             blocks.add_code_from(f)
 
-        text = blocks.code('yaml')
+        text = blocks.code(
+            include_all=['yaml'],
+            exclude_any=['title="Excluded"'],
+        )
     else:
         raise ValueError(f"Not supported file format: {extension}")
 

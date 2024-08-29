@@ -1,3 +1,39 @@
+## General ideas
+
+1. Add include ability, to share data-types, external definitions, etc among specs
+2. Data types
+3. External definitions
+4. DSL for 'if' sections
+5. DSL for enter/exit/do sections
+6. Upgrade delayed and queued event specs and handling: merge parameters
+7. Fall-through event handling?
+
+```yaml
+   case:
+      transitions:
+
+        - when: tick
+          do: ticks_num++
+          fallthrough: true
+
+        - from: s1
+          to: s2
+          when: tick
+          if: ticks_num > 10
+```
+
+After handling this transition, tick event handler continue to process
+other transitions.
+This approach breaks to some extent semantic of an FSM: one event - one transition
+esp. on conditional transitions.
+We may restrict fall-through transition handling only to self-loops without 'if',
+then it is almost the same as to add code of 'do' actions from fall-though transition
+to all other transitions for this event.
+Only problem here is when other branches are not taken and we go to unhandled event code.
+To avoid this mismatch in semantic, we may explicitly update 'do' sections from other
+branches.
+But for practice fall-through handling may be very useful: saves code and simplifies specification
+
 ## Abstraction from an output language
 
 Possible solution here is using processing in two stages:

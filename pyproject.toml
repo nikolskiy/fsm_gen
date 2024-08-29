@@ -40,6 +40,9 @@ mkdocs-include-markdown-plugin = "^6.2.2"
 [tool.poetry.group.cli.dependencies]
 typer = {extras = ["all"], version = "^0.12.3"}
 
+[tool.poetry.group.tests]
+[tool.poetry.group.tests.dependencies]
+pytest = "^8.3.2"
 
 [build-system]
 requires = ["poetry-core"]
@@ -47,3 +50,9 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
 fsm = "cli.main:app"
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]
+pythonpath = "pyfsm"

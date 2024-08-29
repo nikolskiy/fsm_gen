@@ -1,43 +1,16 @@
-# Plans:
-1. Add include ability, to share data-types, external definitions, etc among specs
-2. Data types
-3. External definitions
-4. DSL for 'if' sections
-5. DSL for enter/exit/do sections
-6. Upgrade delayed and queued event specs and handling: merge parameters
-7. Fall-through event handling?
+# FSM example
 
-```yaml .exclude
-   case:
-      transitions:
+Define a simple example.
 
-        - when: tick
-          do: ticks_num++
-          fallthrough: true
+## Meta information
 
-        - from: s1
-          to: s2
-          when: tick
-          if: ticks_num > 10
-```
-
-After handling this transition, tick event handler continue to process
-other transitions.
-This approach breaks to some extent semantic of an FSM: one event - one transition
-esp. on conditional transitions.
-We may restrict fall-through transition handling only to self-loops without 'if',
-then it is almost the same as to add code of 'do' actions from fall-though transition
-to all other transitions for this event.
-Only problem here is when other branches are not taken and we go to unhandled event code.
-To avoid this mismatch in semantic, we may explicitly update 'do' sections from other
-branches.
-But for practice fall-through handling may be very useful: saves code and simplifies specification
+Name is required.
 
 ```yaml
 name: example1
 ```
 
-# Type
+## Type
 
 Static type assumes only one copy of fsm per executable
 intended use is creation on program startup and deletion
@@ -47,7 +20,7 @@ all functions work on this hidden state
 i.e. passing of state is not assumed
 only parameters for even handlers
 
-```yaml .exclude
+```yaml title="Excluded"
 type: static
 ```
 
@@ -60,7 +33,7 @@ for these states
 type: dynamic
 ```
 
-# Code generation options
+## Code generation options
 
 These options are not mandatory
 by default names for files are: {name}.h and {name}.c
@@ -90,7 +63,7 @@ source:
     #include <stdlib.h>
     #include <stdint.h>
   epilog: |
-    // to siplify testing
+    // to simplify testing
     int main() {
         example1_state_variables_type fsm;
         example1_init(&fsm);
@@ -101,7 +74,7 @@ source:
     }
 ```
 
-# Data types TODO
+## Data types
 
 Move data types to separate spec and put here only include stmt
 do not generate data type declarations in fsm code
@@ -129,12 +102,12 @@ Data types allocation scheme:
 The main idea is to give simple and efficient memory
 management for small embedded systems.
 
-# External functions TODO
+## External functions
 
 Can be used in conditions it is responsibility of user
 to guarantee that these functions are pure.
 
-```yaml .exclude
+```yaml title="Excluded"
 pure_functions:
   function1:
     result: type
@@ -148,7 +121,7 @@ Can be used only in code that has some effects:
   'do' actions
   'enter'/'exit'
 
-```yaml .exclude
+```yaml title="Excluded"
 functions:
   # if result is not specified, then function is treated as procedure
   function2:
@@ -156,7 +129,7 @@ functions:
       ....
 ```
 
-# Events definitions
+## Events definitions
 
 Events are central idea of an FSM.
 All transitions (state variables modifications and action code execution)
@@ -184,7 +157,7 @@ events:
   tick:
 ```
 
-# Delayed events
+## Delayed events
 
 List of events that can be delayed.
 What is a delayed event?
@@ -213,7 +186,7 @@ delayed:
 
 Give user an ability to explicitly specify merging of parameters.
 
-```yaml .exclude
+```yaml title="Excluded"
 delayed:
   - max: 8
     events: [event1, event2 ...]
@@ -238,13 +211,13 @@ queue: true
 
 or create separate management for queue:
 
-```yaml .exclude
+```yaml title="Excluded"
 queue:
   max: 8
 ```
 
 
-# How to handle unhandled events
+## How to handle unhandled events
 
 Sometimes there is no transition from state for incoming event
 or transition conditions is not met
@@ -256,15 +229,15 @@ So there is several ways to handle this case:
 Handler can be common for all events.
 ignore and halt are self explanatory:
 
-```yaml .exclude
+```yaml title="Excluded"
 unhandled events: ignore
 ```
 
-```yaml .exclude
+```yaml title="Excluded"
 unhandled events: halt
 ```
 
-```yaml .exclude
+```yaml title="Excluded"
 unhandled events: |
   // user can place here specific code
   // for handling unhandled events
@@ -289,7 +262,7 @@ unhandled events:
     // 1234
 ```
 
-# State variables definition
+## State variables definition
 
 There is one extra hidden variable is added
 to track current state
@@ -303,7 +276,7 @@ state variables:
     char: 0
 ```
 
-# Optional Initialization & de-initialization
+## Optional Initialization & de-initialization
 
 User may define specific actions on FSM creation/destroy
 to handle some complex initialization of state variables
@@ -321,7 +294,7 @@ deinit: |
   // FSM data should not be de-allocated yet
 ```
 
-# States definitions
+## States definitions
 
 Each state can have optional entry/exit actions
 Enter actions are executed after transition actions and
@@ -358,8 +331,7 @@ Mandatory definition of initial state
 initial state: state3
 ```
 
-
-# Transitions
+## Transitions
 
 The most interesting part of FSM specification
 
@@ -388,7 +360,7 @@ transitions:
 we may define several transitions in one definition
 actually, next definition is shortcut for two:
 
-```yaml .exclude
+```yaml title="Excluded"
     - from: state1
       ...
     and
@@ -442,15 +414,17 @@ so next definition is adding self-loops on event 'tick'
 
 Here is the trickiest definition
 it actually defines four transitions:
-1. state1->state3 on event1
-2. state1->state3 on event3
-3. state2->state3 on event1
-4. state2->state3 on event3
-BUT NB!: event1 and event3 parameters must be exactly the same
-         because all these transitions effectively share the same 'do' section
-         we may loose requirements for definitions without 'do' section, but
-         it may lead to some mess, because of different semantic handling of
-         definitions depending on presence of 'do' section, which might be undesirable
+
+   1. state1->state3 on event1
+   2. state1->state3 on event3
+   3. state2->state3 on event1
+   4. state2->state3 on event3
+
+BUT NB!: `event1` and `event3` parameters must be exactly the same
+because all these transitions effectively share the same 'do' section
+we may loose requirements for definitions without 'do' section, but
+it may lead to some mess, because of different semantic handling of
+definitions depending on presence of 'do' section, which might be undesirable
 
 ```yaml
   - from: [state1, state2]

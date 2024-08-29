@@ -5,3 +5,4 @@
 * [Future plans](plans.md)
 * [Research](research.md)
 * [All tasks](tasks.md)
+* [Tests](./tests/)
